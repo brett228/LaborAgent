@@ -1,0 +1,7 @@
+openai==1.97.1
+pytesseract
+pdfplumber
+pillow
+PyPDF2
+faiss-cpu
+pdf2image
