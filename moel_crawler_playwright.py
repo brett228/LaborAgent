@@ -1,10 +1,13 @@
-# moel_fastcounsel_detail_scrape_final_v5.py
+"""
+고용노동부 빠른인터넷 상담 크롤링 모듈
+"""
 
 from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
 import json
 import time
 import re
 import urllib.parse
+import os
 
 # 크롤링할 기본 URL
 BASE_URL = "https://www.moel.go.kr"
@@ -14,6 +17,49 @@ BASE_LIST_URL = "https://www.moel.go.kr/minwon/fastcounsel/fastcounselList.do"
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/100.0.4896.127 Safari/537.36",
 }
+
+
+
+def load_previous_json(path):
+    if not os.path.exists(path):
+        return {}
+    with open(path, "r", encoding="utf-8") as f:
+        old = json.load(f)
+        # qnum 기준으로 dict 매핑
+        return { item["list"]["qnum"]: item for item in old }
+
+
+def merge_incremental(previous_dict, new_items):
+    """
+    previous_dict: 기존 JSON을 qnum 기준 dict 형태로 만든 것
+    new_items: 이번에 수집한 collected 리스트
+    """
+    updated_items = previous_dict.copy()
+
+    for item in new_items:
+        qnum = item["list"]["qnum"]
+        new_state = item["list"]["state"]
+
+        if qnum not in previous_dict:
+            # 신규 항목
+            updated_items[qnum] = item
+            print(f"[NEW] 신규 질문 추가: {qnum} {item['list']['title']}")
+            continue
+        
+        # 기존 항목
+        old_state = previous_dict[qnum]["list"]["state"]
+
+        # 미완료 → 답변완료 변경 확인
+        if old_state != "답변완료" and new_state == "답변완료":
+            updated_items[qnum] = item
+            print(f"[UPDATE] 답변완료로 갱신: {qnum} {item['list']['title']}")
+            continue
+
+        # 그 외는 변경 없음 (skip)
+    
+    # dict → list로 변환
+    return list(updated_items.values())
+
 
 def parse_detail(page):
     """
@@ -49,7 +95,7 @@ def crawl(max_pages=3, delay=1.5, output_json="fastcounsel_with_detail.json"):
     collected = []
     
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=False)
+        browser = p.chromium.launch(headless=True)
         context = browser.new_context(user_agent=HEADERS["User-Agent"], locale="ko-KR")
         list_page = context.new_page()
 
@@ -82,7 +128,7 @@ def crawl(max_pages=3, delay=1.5, output_json="fastcounsel_with_detail.json"):
                         "qnum": qnum.inner_text().strip(),
                         "title": a.inner_text().strip(),
                         "date": date_td.inner_text().strip(),
-                        "state": state_td.inner_text().strip() if state_td else "미확인",
+                        "state": state_td.inner_text().strip() if state_td else "미완료",
                     })
             
             # 2. 추출된 정보를 순회하며 상세 크롤링
@@ -135,10 +181,19 @@ def crawl(max_pages=3, delay=1.5, output_json="fastcounsel_with_detail.json"):
         browser.close()
 
     # JSON 저장
-    with open(output_json, "w", encoding="utf-8") as f:
-        json.dump(collected, f, ensure_ascii=False, indent=2)
+    # 1) 기존 JSON 로드
+    previous = load_previous_json(output_json)
 
-    print(f"\n[done] ✨ 수집 완료: {len(collected)}개 항목 → **{output_json}**")
+    # 2) 신규 + 변경 항목만 반영하여 merge
+    merged = merge_incremental(previous, collected)
+
+    # 3) 최종 저장
+    with open(output_json, "w", encoding="utf-8") as f:
+        json.dump(merged, f, ensure_ascii=False, indent=2)
+
+    print(f"\n[done] ✨ 수집 완료 (증분 반영): 기존 {len(previous)} → 현재 {len(merged)} 개")
+
+
 
 if __name__ == "__main__":
     crawl(max_pages=1, delay=1.5)
