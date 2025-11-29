@@ -1,80 +1,104 @@
-import requests
-from bs4 import BeautifulSoup
+from playwright.sync_api import sync_playwright
+import json
 import time
 
-BASE_URL = "https://www.moel.go.kr/minwon/fastcounsel/fastcounselList.do"
-HEADERS = {
-    "User-Agent": "Mozilla/5.0 (compatible; YourBot/1.0; +youremail@example.com)"
-}
+BASE_URL = "https://labor.moel.go.kr"
+LIST_PAGE = f"{BASE_URL}/cmmt/iqrs_list.do"
 
-def fetch_list(page_index=1, rows_per_page=20, search_text=None, status=None):
-    params = {
-        "pageIndex": page_index,
-        "pageUnit": rows_per_page,  # 혹은 "pageSize" 또는 비슷한 이름
-    }
-    if search_text:
-        params["searchText"] = search_text
-    if status:
-        params["status"] = status  # 예: "답변완료", "미완료"
-    resp = requests.get(BASE_URL, params=params, headers=HEADERS, timeout=15)
-    resp.raise_for_status()
-    return resp.text
+def fetch_list_rows(page):
+    """
+    페이지 로딩 후 리스트 테이블의 row들을 반환
+    """
+    page.goto(LIST_PAGE)
+    # 네트워크가 안정될 때까지 대기
+    page.wait_for_load_state("networkidle")
+    # JS 렌더링이 끝날 때까지 잠시 대기
+    time.sleep(1.5)
 
-def parse_list(html):
-    soup = BeautifulSoup(html, "html.parser")
-    rows = []
-    # 게시판 테이블의 rows 선택자 조정
-    table = soup.select_one("table.board_list")  # 예시; 실제 클래스명 확인 필요
-    if not table:
-        # 다른 구조일 경우 리스트 형태 li 등
-        items = soup.select(".fastcounselList li")
-    else:
-        items = table.select("tr")[1:]  # 헤더 제외
-
-    for item in items:
-        # 번호
-        num_td = item.select_one("td.num")
-        number = num_td.get_text(strip=True) if num_td else None
-
-        # 제목 + 링크
-        title_a = item.select_one("td.title a")
-        title = title_a.get_text(strip=True) if title_a else None
-        link = title_a["href"] if title_a and "href" in title_a.attrs else None
-
-        # 등록일
-        date_td = item.select_one("td.date")
-        date = date_td.get_text(strip=True) if date_td else None
-
-        # 답변 여부
-        status_td = item.select_one("td.status")
-        status = status_td.get_text(strip=True) if status_td else None
-
-        rows.append({
-            "number": number,
-            "title": title,
-            "link": link,
-            "date": date,
-            "status": status
-        })
+    # 테이블 row 선택
+    rows = page.query_selector_all("table.board_list tbody tr")
     return rows
 
-def crawl_all(max_pages=100):
-    all_items = []
-    for page in range(1, max_pages + 1):
-        html = fetch_list(page_index=page, rows_per_page=20)
-        items = parse_list(html)
-        if not items:
-            break
-        all_items.extend(items)
-        print(f"Page {page} fetched, {len(items)} items.")
-        time.sleep(1.0)
-    return all_items
+def parse_row(row):
+    """
+    row에서 데이터 추출
+    """
+    cells = row.query_selector_all("td")
+    if len(cells) < 4:
+        return None
+    a_tag = cells[1].query_selector("a")
+    if not a_tag:
+        return None
+    title = a_tag.inner_text().strip()
+    href = a_tag.get_attribute("href")
+    full_link = BASE_URL + href
+    date = cells[-1].inner_text().strip()
+    return {"title": title, "link": full_link, "date": date}
+
+def fetch_detail(page, url):
+    """
+    상세 페이지에서 질문/답변 추출
+    """
+    page.goto(url)
+    page.wait_for_load_state("networkidle")
+    time.sleep(0.5)  # JS 렌더링 대기
+
+    question_el = page.query_selector(".question_section")
+    answer_el = page.query_selector(".answer_section")
+
+    question = question_el.inner_text().strip() if question_el else ""
+    answer = answer_el.inner_text().strip() if answer_el else ""
+    return {"question": question, "answer": answer}
+
+def main(total_pages=2, delay=0.5):
+    all_data = []
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=False)  # 실제 브라우저 확인 가능
+        page = browser.new_page()
+
+        for pg in range(1, total_pages + 1):
+            print(f"[PAGE] {pg}")
+            rows = fetch_list_rows(page)
+
+            for row in rows:
+                item = parse_row(row)
+                if not item:
+                    continue
+                print(f"  Fetching detail: {item['title']}")
+                try:
+                    detail = fetch_detail(page, item["link"])
+                except Exception as e:
+                    print(f"    Failed to fetch detail for {item['link']}: {e}")
+                    continue
+                record = {
+                    "title": item["title"],
+                    "date": item["date"],
+                    "link": item["link"],
+                    "question": detail["question"],
+                    "answer": detail["answer"]
+                }
+                all_data.append(record)
+                time.sleep(delay)
+
+            # 다음 페이지 버튼 클릭
+            try:
+                next_btn = page.query_selector(f"a[onclick*='fn_goPage({pg+1})']")
+                if next_btn:
+                    next_btn.click()
+                    time.sleep(1)
+                else:
+                    print(f"Page button {pg+1} not found, skipping")
+                    break
+            except Exception as e:
+                print(f"Failed to go to next page: {e}")
+                break
+
+        browser.close()
+
+    # JSON 저장
+    with open("moel_iqrs_browser.json", "w", encoding="utf-8") as f:
+        json.dump(all_data, f, ensure_ascii=False, indent=2)
+    print(f"Saved {len(all_data)} records.")
 
 if __name__ == "__main__":
-    data = crawl_all(max_pages=50)
-    # 저장 예
-    import csv
-    with open("fastcounsel_list.csv", "w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=["number","title","link","date","status"])
-        writer.writeheader()
-        writer.writerows(data)
+    main(total_pages=5, delay=0.5)
