@@ -40,7 +40,7 @@ def load_previous(path):
 # 3) 리스트 페이지 XHR 요청 (HTML 예시)
 # -------------------------
 def fetch_list_page(page_index):
-    params = {"pageIndex": page_index}
+    params = {"pageNum": page_index}
     resp = requests.get(BASE_LIST_URL, headers=HEADERS, params=params, timeout=30, verify=False)
     resp.raise_for_status()
     return resp.text
@@ -152,4 +152,4 @@ def main(max_pages=None):
 
 
 if __name__ == "__main__":
-    main()
+    main(max_pages=3)
