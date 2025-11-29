@@ -88,8 +88,8 @@ def fetch_detail(link):
             return {"question": "", "answer": ""}
 
         # 모든 dl에서 dd만 추출
-        dd_q = dls[0].select("dd")  # 첫 번째 dl 기준
-        dd_a = dls[1].select("dd")  # 첫 번째 dl 기준
+        dd_q = dls[0].select("dd") if len(dls) > 0 else []
+        dd_a = dls[1].select("dd") if len(dls) > 1 else []
         # print("dls: ", len(dls))
         # print("dls0: ", dls[0], "\n", "dls1: ", dls[1])
         # print("dls0: ",(dls[0].select("dd")[0]))

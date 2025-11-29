@@ -87,8 +87,8 @@ def fetch_detail(link):
         qbox = soup.find_all("dd", class_="qBox")
         abox = soup.find_all("dd", class_="aBox")
 
-        dd_q = qbox[0].select("span") 
-        dd_a = abox[0].select("p") 
+        dd_q = qbox[0].select("span") if qbox else []
+        dd_a = abox[0].select("p") if abox else []
         
         question = " ".join([dd_q[i].get_text(strip=True) for i in range(len(dd_q))]) if len(dd_q) > 0 else ""
         answer = " ".join([dd_a[i].get_text(strip=True) for i in range(len(dd_a))]) if len(dd_a) > 0 else ""
@@ -152,4 +152,4 @@ def main(max_pages=None):
 
 
 if __name__ == "__main__":
-    main(max_pages=3)
+    main(max_pages=2)
