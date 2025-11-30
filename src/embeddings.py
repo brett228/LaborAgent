@@ -1,9 +1,14 @@
+import os
+from pathlib import Path
 from dotenv import load_dotenv
 import numpy as np
 from openai import OpenAI
 
-load_dotenv()  # reads .env file
-client = OpenAI(api_key=OPENAI_API_KEY)
+# Explicitly load .env from project root (parent of src)
+env_path = Path(__file__).parent.parent / ".env"
+load_dotenv(dotenv_path=env_path)
+
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 def get_embedding(text: str):
     response = client.embeddings.create(
