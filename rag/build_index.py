@@ -1,40 +1,65 @@
-# rag/build_index.py
-import faiss
+# rag/build_chroma_index.py
+
 import json
-import numpy as np
 from pathlib import Path
+from chromadb import Client
+from chromadb.config import Settings
 
 
-def initialize_index(dim, save_dir="faiss_index"):
+DEFAULT_COLLECTION = "chunks"
+
+
+def initialize_index(dim, save_dir="chroma_index", collection_name=DEFAULT_COLLECTION):
     """
-    Create a new empty FAISS index + empty chunks.json
+    Create an empty Chroma DB collection and empty chunks.json.
+    This replaces FAISS initialize_index().
     """
     save_dir = Path(save_dir)
     save_dir.mkdir(parents=True, exist_ok=True)
 
-    index = faiss.IndexFlatL2(dim)
-    faiss.write_index(index, str(save_dir / "index.faiss"))
-
-    # initialize empty metadata store
+    # initialize empty chunk metadata
     with open(save_dir / "chunks.json", "w", encoding="utf-8") as f:
         json.dump([], f, ensure_ascii=False, indent=2)
 
-    return index
+    # Create chroma client
+    client = Client(
+        Settings(
+            chroma_db_impl="duckdb+parquet",
+            persist_directory=str(save_dir),
+        )
+    )
+
+    # If collection already exists, remove and recreate
+    if collection_name in [c.name for c in client.list_collections()]:
+        client.delete_collection(collection_name)
+
+    collection = client.create_collection(name=collection_name)
+
+    return collection
 
 
-def add_documents(chunks, get_embedding_fn, save_dir="faiss_index"):
+
+def add_documents(chunks, get_embedding_fn, save_dir="chroma_index", collection_name=DEFAULT_COLLECTION):
     """
-    Append new documents to an existing FAISS index.
-    chunks: list of raw text chunks from new documents
+    Append new documents to an existing ChromaDB collection.
+    Replicates FAISS add_documents() behavior.
     """
     save_dir = Path(save_dir)
 
-    # --- Load existing index ---
-    index = faiss.read_index(str(save_dir / "index.faiss"))
-
-    # --- Load existing chunks (metadata) ---
+    # --- Load existing chunks.json ---
     with open(save_dir / "chunks.json", "r", encoding="utf-8") as f:
         existing_chunks = json.load(f)
+
+    # Connect to persisted Chroma DB
+    client = Client(
+        Settings(
+            chroma_db_impl="duckdb+parquet",
+            persist_directory=str(save_dir),
+        )
+    )
+
+    # Load collection
+    collection = client.get_collection(collection_name)
 
     # Compute embeddings for new chunks
     new_embeddings = []
@@ -42,18 +67,23 @@ def add_documents(chunks, get_embedding_fn, save_dir="faiss_index"):
         emb = get_embedding_fn(chunk)
         new_embeddings.append(emb)
 
-    new_embeddings = np.array(new_embeddings).astype("float32")
+    # New IDs start after existing count
+    start_id = len(existing_chunks)
+    new_ids = [str(start_id + i) for i in range(len(chunks))]
 
-    # --- Append vectors to FAISS index ---
-    index.add(new_embeddings)
+    # Append new vectors to Chroma
+    collection.add(
+        ids=new_ids,
+        embeddings=new_embeddings,
+        metadatas=[{"chunk_index": int(i)} for i in new_ids],
+        documents=chunks,
+    )
 
-    # --- Append metadata (keep ordering aligned with FAISS IDs) ---
+    # Update local metadata
     updated_chunks = existing_chunks + chunks
 
-    # --- SAVE BACK ---
-    faiss.write_index(index, str(save_dir / "index.faiss"))
-
+    # Write back chunks.json
     with open(save_dir / "chunks.json", "w", encoding="utf-8") as f:
         json.dump(updated_chunks, f, ensure_ascii=False, indent=2)
 
-    return index, updated_chunks
+    return collection, updated_chunks
