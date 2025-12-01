@@ -9,15 +9,27 @@ import requests
 import time
 import sqlite3
 import datetime
+from pathlib import Path
+import sys
+import urllib3
 from src.embeddings import get_embedding
-from rag.build_index import add_documents
-
+from src.rag.build_index import add_documents
 
 
 # -------------------------
 # 0) URL / 환경 설정
 # -------------------------
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
+try:
+    BASE_DIR = Path(__file__).resolve().parent.parent
+except NameError:
+    BASE_DIR = Path.cwd()
+
+OUTPUT_JSON = "iqrs_incremental.json"
+OUTPUT_DB = "iqrs.db"
+JSON_PATH = BASE_DIR / "data" / OUTPUT_JSON
+DB_PATH = BASE_DIR / "db"/ OUTPUT_DB
 BASE_LIST_URL = "https://labor.moel.go.kr/cmmt/iqrs_list.do"
 BASE_DETAIL_URL = "https://labor.moel.go.kr/cmmt/iqrs_detail.do?id="
 BASE_URL = "https://labor.moel.go.kr"
@@ -25,8 +37,7 @@ HEADERS = {
     "User-Agent": "Mozilla/5.0 (compatible; YourBot/1.0; +youremail@example.com)"
 }
 
-OUTPUT_JSON = "iqrs_incremental.json"
-DB_PATH = "iqrs.db"
+
 
 # -------------------------
 # 0-1) DB 초기화
@@ -103,14 +114,16 @@ def process_embeddings(items):
         q = item["detail"].get("question", "")
         a = item["detail"].get("answer", "")
         title = item["list"].get("title", "")
+        link = item["list"].get("link", "")
+        ref_no = item["list"].get("ref_no", "")
         
         # 문서 포맷팅
-        text = f"Title: {title}\nQ: {q}\nA: {a}"
+        text = f"Title: {title}\nQ: {q}\nA: {a}\nLink: {link}\nRef_no: {ref_no}"
         chunks.append(text)
     
     if chunks:
         print(f"[Embedding] Processing {len(chunks)} chunks...")
-        add_documents(chunks, get_embedding)
+        add_documents(chunks, get_embedding, collection_name="iqrs")
         print("[Embedding] Done.")
 
 # -------------------------
@@ -126,7 +139,7 @@ def load_previous(path):
         return {}
 
 # -------------------------
-# 3) 리스트 페이지 XHR 요청 (HTML 예시)
+# 2) 리스트 페이지 XHR 요청 (HTML 예시)
 # -------------------------
 def fetch_list_page(page_index):
     params = {"pageNum": page_index}
@@ -135,7 +148,7 @@ def fetch_list_page(page_index):
     return resp.text
 
 # -------------------------
-# 4) 리스트 파싱 (HTML)
+# 3) 리스트 파싱 (HTML)
 # -------------------------
 def parse_list_page(html):
     soup = BeautifulSoup(html, "html5lib")
@@ -167,7 +180,7 @@ def parse_list_page(html):
     return items
 
 # -------------------------
-# 5) 상세 페이지 크롤링
+# 4) 상세 페이지 크롤링
 # -------------------------
 def fetch_detail(link):
     try:
@@ -191,7 +204,7 @@ def fetch_detail(link):
         return {"question": "[ERROR]", "answer": str(e)}
 
 # -------------------------
-# 6) 증분 merge
+# 5) 증분 merge
 # -------------------------
 def merge_incremental(previous, new_items):
     updated = previous.copy()
@@ -213,12 +226,12 @@ def merge_incremental(previous, new_items):
     return new_records, new_records + existing_records
 
 # -------------------------
-# 7) 메인
+# 6) 메인
 # -------------------------
 def main(max_pages=None):
     init_db() # DB 초기화
     
-    previous = load_previous(OUTPUT_JSON)
+    previous = load_previous(JSON_PATH)
     existing_qnums = set(previous.keys())
     all_new = []
 
@@ -259,7 +272,7 @@ def main(max_pages=None):
     new_records_with_detail, merged = merge_incremental(previous, all_new)
 
     # 저장
-    with open(OUTPUT_JSON, "w", encoding="utf-8") as f:
+    with open(JSON_PATH, "w", encoding="utf-8") as f:
         json.dump(merged, f, ensure_ascii=False, indent=2)
 
     # DB 및 임베딩 저장 (신규 데이터만)
