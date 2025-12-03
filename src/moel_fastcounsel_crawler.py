@@ -6,40 +6,125 @@ from bs4 import BeautifulSoup
 import hashlib
 import json
 import requests
+import sqlite3
 import time
+from pathlib import Path
+
+from src.embeddings import get_embedding
+from src.rag.build_index import add_documents
 
 
 # -------------------------
 # 0) URL / 환경 설정
 # -------------------------
+try:
+    BASE_DIR = Path(__file__).resolve().parent.parent
+except NameError:
+    BASE_DIR = Path.cwd()
+
+OUTPUT_JSON = "moel_fastcounsel.jsonl"
+OUTPUT_DB = "moel_fastcounsel.db"
+JSON_PATH = BASE_DIR / "data" / OUTPUT_JSON
+DB_PATH = BASE_DIR / "db"/ OUTPUT_DB
 
 BASE_LIST_URL = "https://www.moel.go.kr/minwon/fastcounsel/fastcounselList.do"
 BASE_URL = "https://www.moel.go.kr"
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
 }
-OUTPUT_JSON = "fastcounsel_incremental.json"
+
 
 # -------------------------
-# 1) 이전 JSON 불러오기
+# 0-1) DB 초기화
 # -------------------------
-def load_previous(path):
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-            # qnum 기준 dict
-            return {item["list"]["qnum"]: item for item in data}
-    except FileNotFoundError:
-        return {}
+def init_db():
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS moel_fastcounsel (
+            qnum TEXT PRIMARY KEY,
+            title TEXT,
+            question TEXT,
+            answer TEXT,
+            link TEXT,
+            state TEXT,
+            date TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    conn.commit()
+    conn.close()
 
 # -------------------------
-# 2) 변경 감지용 hash 계산
+# 0-2) DB 저장
 # -------------------------
-def compute_hash(text):
-    return hashlib.md5(text.encode("utf-8")).hexdigest()
+def save_to_db(items):
+    if not items:
+        return
+    
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    
+    data_to_insert = [
+        (
+            item["qnum"],
+            item["title"],
+            item["question"],
+            item["answer"],
+            item["link"],
+            item["state"],
+            item["date"],
+        )
+        for item in items if item["state"] == "답변완료"
+        ]
+        
+    cur.executemany("""
+        INSERT OR IGNORE INTO moel_fastcounsel (qnum, title, question, answer, link, state, date)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+    """, data_to_insert)
+    
+    conn.commit()
+    conn.close()
+    print(f"[DB] Saved {len(data_to_insert)} items to {DB_PATH}")
 
 # -------------------------
-# 3) 리스트 페이지 XHR 요청 (HTML 예시)
+# 0-3) 임베딩 처리
+# -------------------------
+def process_embeddings(items):
+    if not items:
+        return
+
+    # 텍스트 청크 생성
+    chunks = []
+    for item in items:
+        q = item["question"]
+        a = item["answer"]
+        title = item["title"]
+        link = item["link"]
+        
+        # 문서 포맷팅
+        text = f"Title: {title}\nQ: {q}\nA: {a}\nLink: {link}"
+        chunks.append(text)
+    
+    if chunks:
+        print(f"[Embedding] Processing {len(chunks)} chunks...")
+        add_documents(chunks, get_embedding, collection_name="moel_fastcounsel")
+        print("[Embedding] Done.")
+
+
+# -------------------------
+# 1) 기존 보유 qnum 불러오기
+# -------------------------
+def get_existing_qnums():
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute("SELECT qnum FROM moel_fastcounsel")
+    rows = cur.fetchall()
+    conn.close()
+    return set(row[0] for row in rows)
+
+# -------------------------
+# 2) 리스트 페이지 XHR 요청 (HTML 예시)
 # -------------------------
 def fetch_list_page(page_index):
     params = {"pageIndex": page_index}
@@ -48,7 +133,7 @@ def fetch_list_page(page_index):
     return resp.text
 
 # -------------------------
-# 4) 리스트 파싱 (HTML)
+# 3) 리스트 파싱 (HTML)
 # -------------------------
 def parse_list_page(html):
     soup = BeautifulSoup(html, "html5lib")
@@ -102,8 +187,8 @@ def fetch_detail(link):
         
         question = dd_q[0].get_text(strip=True) if len(dd_q) > 0 else ""
         answer = dd_a[0].get_text(strip=True) if len(dd_a) > 0 else ""
-        print('q:', question)
-        print('a:', answer)
+        # print('q:', question)
+        # print('a:', answer)
 
         return {"question": question, "answer": answer}
     except Exception as e:
@@ -112,45 +197,80 @@ def fetch_detail(link):
 # -------------------------
 # 6) 증분 merge
 # -------------------------
-def merge_incremental(previous, new_items):
-    updated = previous.copy()
-    for item in new_items:
-        qnum = item["qnum"]
-        text_hash = compute_hash(item["title"] + item["state"])
-        prev_hash = previous[qnum]["hash"] if qnum in previous else None
-
-        # 신규 또는 상태 변경
-        if qnum not in previous or text_hash != prev_hash:
-            # 상세 페이지 가져오기
-            detail = fetch_detail(item["link"])
-            updated[qnum] = {
-                "list": item,
-                "detail": detail,
-                "hash": text_hash
-            }
-            print(f"[UPDATE] {qnum} {item['title']}")
-    return list(updated.values())
+def append_jsonl(record):
+    with open(JSON_PATH, "a", encoding="utf-8") as f:
+        f.write(json.dumps(record, ensure_ascii=False) + "\n")
 
 # -------------------------
 # 7) 메인
 # -------------------------
-def main(max_pages=80):
-    previous = load_previous(OUTPUT_JSON)
+def main(max_pages=None, min_consecutive_complete=50):
+    init_db() # DB 초기화
+    
+    existing_qnums = get_existing_qnums()
+    print(f"[INFO] Existing records in DB: {len(existing_qnums)}")
     all_new = []
 
-    for page_index in range(1, max_pages + 1):
+    page_index = 1
+    stop_flag = False
+    consecutive_complete_state = 0
+
+    while True:
+        if max_pages is not None and page_index > max_pages:
+            break
+
         html = fetch_list_page(page_index)
         page_items = parse_list_page(html)
-        all_new.extend(page_items)
-        time.sleep(0.2)  # 부하 최소화
 
-    merged = merge_incremental(previous, all_new)
+        # Stop if no more items on the page
+        if not page_items:
+            break
 
-    # 저장
-    with open(OUTPUT_JSON, "w", encoding="utf-8") as f:
-        json.dump(merged, f, ensure_ascii=False, indent=2)
+        for item in page_items:
+            qnum = item["qnum"]
+            state = item["state"]
 
-    print(f"[DONE] 총 {len(merged)}개 항목 저장 완료.")
+            if state == "답변완료":
+                consecutive_complete_state += 1
+            else:
+                consecutive_complete_state = 0
+            # print(consecutive_complete_state, qnum in existing_qnums)
+            # 기존 데이터에 item이 존재하고, 크롤링 대상이 연속으로 설정한 숫자 이상 답변완료인 경우 크롤링 중단
+            if (qnum in existing_qnums) & (consecutive_complete_state >= min_consecutive_complete):
+                # ★ 증분 크롤링 종료 지점
+                print(f"[STOP] Reached existing qnum {qnum}.\n       Reached {consecutive_complete_state} consecutive [답변완료] state.\n       Stopping incremental crawl.")
+                stop_flag = True
+                break
+
+            detail = fetch_detail(item["link"])
+
+            record = {
+                "qnum": item["qnum"],
+                "title": item["title"],
+                "question": detail.get("question", ""),
+                "answer": detail.get("answer", ""),
+                "link": item["link"],
+                "state": item["state"],
+                "date": item["date"]
+            }
+
+            if (record["state"] == "답변완료") and (qnum not in existing_qnums):
+                append_jsonl(record)
+                all_new.append(record)
+        
+        if stop_flag:
+            break
+
+        print(f"[INFO] Page {page_index} crawled, new & complete: {len(all_new)} items")
+        page_index += 1
+        time.sleep(0.2)
+    
+    # DB 및 임베딩 저장 (신규 데이터만)
+    if all_new:
+        save_to_db(all_new)
+        process_embeddings(all_new)
+
+    print(f"[DONE] 신규 {len(all_new)}개 저장 완료.")
 
 if __name__ == "__main__":
-    main(max_pages=2)
+    main(max_pages=3)

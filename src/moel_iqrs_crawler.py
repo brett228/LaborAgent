@@ -209,7 +209,7 @@ def main(max_pages=None):
     print(f"[INFO] Existing records in DB: {len(existing_qnums)}")
     all_new = []
 
-    page_index = 3
+    page_index = 1
     stop_flag = False
 
     while True:
@@ -264,4 +264,4 @@ def main(max_pages=None):
 
 
 if __name__ == "__main__":
-    main(max_pages=4)
+    main(max_pages=2)

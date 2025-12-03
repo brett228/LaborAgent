@@ -47,7 +47,7 @@ def search_multiple_collections(client, collection_names, query, get_embedding_f
     
     Returns top_k results sorted by distance.
     """
-    print("#MCP: search_multiple_collections")
+    print("# MCP: search_multiple_collections")
     query_emb = get_embedding_fn(query)
     all_results = []
 
