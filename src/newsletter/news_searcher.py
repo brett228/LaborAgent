@@ -229,7 +229,7 @@ def search_labortoday_news(query, n_news=5, max_pages=10):
                 articles.append({
                     "key": "L"+str(k + 1).zfill(4),
                     "title": title,
-                    "link": link_base + link,
+                    "link": link,
                     "content": content,
                     "date": date[:10],
                     "source": "매일노동법률"

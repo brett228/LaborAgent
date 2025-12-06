@@ -3,18 +3,21 @@ import json
 import math
 import os
 
+from src.embeddings import get_embedding
+from src.rag.load_index import load_chroma_collection, search_vector_store
 from src.newsletter.news_searcher import search_all_newslist, search_all_text
+from src.newsletter.policy_search import search_press_release
 from src.newsletter.newsletter_renderer import NewsletterRenderer
-from src.utils.selectors import prompt_user_choice
+from src.utils.selectors import prompt_user_choice, prompt_user_choice_multiple
 from src.utils.storage import save_html
 from openai import OpenAI
 
 
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-KK = NewsletterAgent()
-KK.run()
-KK.state['articles']
+# KK = NewsletterAgent()
+# KK.run()
+# KK.state['articles']
 
 class NewsletterAgent:
     def __init__(self):
@@ -23,7 +26,9 @@ class NewsletterAgent:
         # 템플릿 구성 슬롯
         self.state = {
             "main_title": None,
-            "topic": None,
+            "news_topic": None,
+            "consult_topic": None,
+            "date": datetime.today(),
             "articles": [],
             "consult": [],
             "policy": []
@@ -32,8 +37,10 @@ class NewsletterAgent:
     def run(self):
         print("### 뉴스레터 제작 에이전트 시작 ###\n")
 
-        # 1. 사용자에게 뉴스 소스 선택받기
-        self.select_sources_and_crawl()
+        # 1. 사용자에게 소스 선택받기
+        self.select_news_sources_and_crawl()
+        self.select_consult_sources_and_crawl()
+        self.select_policy_sources_and_crawl()
 
         # 2. 각 템플릿 영역별 요약 및 후보 생성 → 사용자 선택
         self.process_sections()
@@ -44,22 +51,49 @@ class NewsletterAgent:
         print("\n### 뉴스레터 제작이 완료되었습니다! ###")
 
     # --------------------------------------------------------------------
-    def select_sources_and_crawl(self):
+    def select_news_sources_and_crawl(self):
 
-        self.topic = input("1) 뉴스레터에 포함할 뉴스 주제를 알려주세요: ")
-        self.state["topic"] = self.topic
-        print(f"> 입력된 주제: {self.topic}\n")
+        self.news_topic = input("1) 뉴스레터에 포함할 뉴스 주제를 알려주세요: ")
+        self.state["news_topic"] = self.news_topic
+        print(f"> 입력된 주제: {self.news_topic}\n")
         
-        news_sources = search_all_newslist(self.topic)
-        available_sources = [news['title'] for news in news_sources]
+        news_sources = search_all_newslist(self.news_topic)
+        available_sources = [[news['title'], news['date']] for news in news_sources]
 
-        selected_title = prompt_user_choice(available_sources)
+        selected_title = prompt_user_choice(available_sources)[0]
         print(f"선택된 뉴스: {selected_title}")
 
         self.selected_source = [news for news in news_sources if news['title'] == selected_title][0]
 
         self.raw_articles = search_all_text(self.selected_source)
         print(f"기사 전문을 로드했습니다.\n")
+    
+    # --------------------------------------------------------------------
+    def select_consult_sources_and_crawl(self):
+
+        self.consult_topic = input("2) 뉴스레터에 포함할 자문사례 주제를 알려주세요: ")
+        self.state["consult_topic"] = self.consult_topic
+        print(f"> 입력된 자문사례 주제: {self.consult_topic}\n")
+        
+        # 질의회시로부터 검색
+        moel_iqrs = load_chroma_collection(load_dir="db/chroma_index", collection_name="moel_iqrs")[0]
+        consult_sources = search_vector_store(collection=moel_iqrs, query=self.consult_topic, get_embedding_fn=get_embedding, top_k=5)
+        available_sources = [item.split('\nQ:')[0].replace('Title: ', '') for item in consult_sources]
+
+        selected_title = prompt_user_choice(available_sources)
+        print(f"선택된 자문사례: {selected_title}")
+
+        self.raw_consult = next(item for item in consult_sources if item.startswith(f'Title: {selected_title}'))
+
+        print(f"질의회시 전문을 로드했습니다.\n")
+
+    def select_policy_sources_and_crawl(self):
+
+        available_sources = search_press_release(3)
+
+        print("3) 뉴스레터에 포함할 보도자료를 선정합니다. ")
+        self.selected_policy = prompt_user_choice_multiple(available_sources)
+        print(f"선택된 보도자료: {self.selected_policy}")
 
     # --------------------------------------------------------------------
     def process_sections(self):
@@ -72,10 +106,10 @@ class NewsletterAgent:
         self.create_article_section()
 
         # 컨설팅 영역 구성
-        # self.create_consult_section()
+        self.create_consult_section()
 
         # 정책 영역 구성
-        # self.create_policy_section()
+        self.create_policy_section()
 
     # --------------------------------------------------------------------
     def create_main_title(self):
@@ -146,6 +180,7 @@ class NewsletterAgent:
         
         chosen_articles = {
             "title": self.selected_source['title'],
+            "date": self.selected_source['date'],
             # "content": response.choices[0].message.content,
             "content": json.loads(response.choices[0].message.content)['summary'],
             "implication": json.loads(response.choices[0].message.content)['implication'],
@@ -158,31 +193,66 @@ class NewsletterAgent:
     def create_consult_section(self):
         print("\n[컨설팅 영역 구성]")
 
-        consult_candidates = self.summarizer.generate_consulting_items()
+        session = []
+        directive = """
+        당신은 인사/노무 관련 뉴스기사를 기반으로 뉴스레터를 작성하기 위해 질의응답을 정리하는 에이전트입니다.
+        다음 규칙에 따라 사용자가 요청한 작업을 수행합니다.
 
-        selected = []
-        while True:
-            chosen = prompt_user_choice(consult_candidates + ["종료"])
-            if chosen == "종료":
-                break
-            selected.append(chosen)
+        1. 공통 규칙
+          - 항상 한글로만 대답합니다.
+          - 욕설과 비속어는 사용하지 않습니다.
+          - 당신의 답변은 주어진 질의응답 원문에만 근거해야 합니다.
+          - '~입니다.', '~습니다'와 같은 격식을 갖춘 어미로 구성된 존대말를 사용합니다.
+            절대로 “~다”, “~요”, “합니다”, “해요”, “합니다요”, "~임", "~음" 등의 어미를 사용하지 않습니다.
+            다만, 질문 작성 부분에 한해 "~요?"와 같은 친근한 어투로 작성합니다.
+        
+        2. 주어진 질의응답 전문을 바탕으로 질문과 그에 대한 응답을 매끄럽게 정리하여 json 형식으로 출력합니다.
+            항상 아래 JSON형식으로만 출력하세요:
+            {
+                "question": "...",
+                "answer": "...",
+            } 
 
-        self.state["consult_items"] = selected
+        3. 주어진 질의응답 원문에 나타난 질문을 한 문장의 의문문으로 정리합니다.
+           답변 예시는 다음과 같습니다.
+           "question": "Q. 회사가 징계절차를 개시하면서 징계혐의자의 징계회부사실을 회사 게시판에 공지해도 되나요?",
+
+        4. 주어진 질의응답 원문에 나타난 답변을 다듬어 1500자 내외로 답변합니다.
+           답변 예시는 다음과 같습니다.
+
+           "answer": "형법은 명예훼손죄에 관하여 “공연히 사실을 적시하여 사람의 명예를 훼손”하는 행위가 “진실한 사실로서 오로지 공공의 이익에 관한 때에는 처벌하지 아니한다”고 규정하고 있습니다(형법 제307조, 제310조). 회사 담당자가 특정 직원에 대한 징계절차를 개시하면서 그의 징계혐의와 징계회부사실을 사내 게시판에 게재하여 구성원에게 공지하는 경우, 그러한 공지의 목적이 조직 내 향후 유사사례 재발 방지 등이라는 이유로 ‘공공의 이익에 관한 때’에 해당하여 명예훼손죄의 위법성이 조각되는 경우로 볼 수 있는지 살펴보겠습니다. 
+           
+           대법원은 “공연히 사실을 적시하여 사람의 명예를 훼손하는 행위가 진실한 사실로서 오로지 공공의 이익에 관한 때에는 형법 제310조에 따라 처벌할 수 없다”고 하면서, “공공의 이익에 관한 것에는 널리 국가·사회 기타 일반 다수인의 이익에 관한 것뿐만 아니라 특정한 사회집단이나 그 구성원 전체의 관심과 이익에 관한 것도 포함”된다는 입장입니다(대법원 2021.8.26. 선고 2021도6416 판결). 해당 판결에서 대법원은 징계회부를 한 후 곧바로 징계혐의사실과 징계회부사실을 회사 게시판에 게시한 행위가 ‘회사 내부의 원활하고 능률적인 운영의 도모’라는 공공의 이익에 관한 것이라고 판단한 원심이 명예훼손죄에서의 ‘공공의 이익’에 관한 법리를 오해하였다고 하면서, “회사 징계절차가 공적인 측면이 있다고 해도 징계절차에 회부된 단계부터 그 과정 전체가 낱낱이 공개되어야 하는 것은 아니고, 징계혐의 사실은 징계절차를 거친 다음 일응 확정되는 것이므로 징계절차에 회부되었을 뿐인 단계에서 그 사실을 공개함으로써 피해자의 명예를 훼손하는 경우, 이를 사회적으로 상당한 행위라고 보기는 어렵고, 그 단계에서의 공개로 원심이 밝힌 공익이 달성될 수 있을지도 의문”이라고 판단하여 원심을 파기하였습니다. 
+           
+           따라서, 질의의 경우와 같이 징계절차를 개시하면서 징계혐의자의 징계회부사실을 회사 게시판에 공지하는 행위는 형법상 명예훼손죄의 위법성이 조각되는 경우에 해당하지 않아 형사처벌 대상이 될 수 있으므로 유의하실 필요가 있겠습니다."
+ 
+        """
+        session = [
+            {"role": "system", "content": directive},
+            {"role": "user", "content": f"질의회시 전문:\n{self.raw_consult}"}
+            ]
+
+        response = client.chat.completions.create(
+            model="gpt-4o",
+            messages=session,
+            response_format={"type": "json_object"},
+            )
+        
+        chosen_consult = {
+            "question": json.loads(response.choices[0].message.content)['question'],
+            "answer": json.loads(response.choices[0].message.content)['answer'],
+            }
+
+        self.state["consult_items"] = chosen_consult
 
     # --------------------------------------------------------------------
     def create_policy_section(self):
-        print("\n[이벤트/교육 안내 구성]")
+        print("\n[보도자료 안내 구성]")
 
-        event_candidates = self.summarizer.generate_event_items()
-
-        selected = []
-        while True:
-            chosen = prompt_user_choice(event_candidates + ["종료"])
-            if chosen == "종료":
-                break
-            selected.append(chosen)
-
-        self.state["events"] = selected
+        html_text = '<br>'.join(f"■ {item['title']} (<a href='{item['link']}' target='_blank'>고용노동부</a>)"
+                                for item in self.selected_policy)    
+        
+        self.state["policy"] = html_text
 
     def edit_final_result(self, html):
         print("\n=== 최종 뉴스레터 미리보기 ===\n")

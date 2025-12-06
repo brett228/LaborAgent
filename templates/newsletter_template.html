@@ -77,6 +77,10 @@
                             <div style="font-size:15px; color:#444; background:#f2f2f2; padding:16px; border:1px solid #e0e0e0; white-space:pre-line;">
                                 {{ article.content }}
                             </div>
+                            <div style="font-size:15px; color:#444; margin-top:14px; white-space:pre-line; line-height:1.5;">
+                                <span style="font-weight:700; color:#333;">시사점:</span><br>
+                                {{ article.implication }}
+                            </div>
                         </td>
                     </tr>
                 </table>
@@ -91,10 +95,10 @@
                     <tr>
                         <td>
                             <div style="font-size:17px; font-weight:700; color:#333; margin-bottom:6px;">
-                                "{{ consult.title }}"
+                                "{{ consult.question }}"
                             </div>
                             <div style="font-size:15px; color:#444; background:#f2f2f2; padding:16px; border:1px solid #e0e0e0; white-space:pre-line;">
-                                {{ consult.content }}
+                                {{ consult.answer }}
                             </div>
                         </td>
                     </tr>
