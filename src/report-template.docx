@@ -1,0 +1,20 @@
+{{ title }}
+
+1. 질의 사항
+{{ query }}
+
+2. 관련 법령
+{% for law in laws %}
+- {{ law }}
+{% endfor %}
+
+3. 관련 사례
+{% for case in cases %}
+- {{ case }}
+{% endfor %}
+
+4. 답변 사항
+{{ analysis }}
+
+[최종 결론]
+{{ final_answer }}

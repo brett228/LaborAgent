@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>화안노동법률사무소 뉴스레터</title>
+
+<style>
+    body {
+        margin: 0;
+        padding: 0;
+        background-color: #f7f7f7;
+        font-family: Arial, sans-serif;
+        -webkit-text-size-adjust: none;
+        -ms-text-size-adjust: none;
+    }
+    a { color: #0066cc; text-decoration: none; }
+    img { border: 0; display: block; outline: none; text-decoration: none; }
+</style>
+</head>
+
+<body style="background-color: #f7f7f7; margin:0; padding:0;">
+
+<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background-color:#f7f7f7;">
+<tr>
+<td align="center">
+
+    <table role="presentation" width="720" cellspacing="0" cellpadding="0" border="0" style="background-color:#ffffff; margin-top:20px; margin-bottom:20px;">
+        <tr>
+            <td style="padding: 20px 30px;">
+
+                <!-- 헤더 -->
+                 
+                <table role="presentation" width="100%">
+                    <tr>
+                        <td align="center"">
+                            <img src="https://raw.githubusercontent.com/brett228/LaborAgent/master/img/ci.png"
+                                 width="110" alt="화안노동법률사무소 로고"
+                                 style="display:block;" />
+                        </td>
+                    </tr>
+
+                    <tr>
+                        <td align="center" style="text-align:center;">
+                            <div style="font-size:15px; font-weight:600; margin-bottom:3px; color:#333;">
+                                화안노동법률사무소
+                            </div>
+                            <div style="font-size:14px; color:#666; margin-bottom:20px;">
+                                화안노동법률사무소에서 전해 드립니다.
+                            </div>
+
+                            <div style="font-size:24px; font-weight:800; margin-top:10px; margin-bottom:3px; color:#111;">
+                                {{ main_title }}
+                            </div>
+                            <div style="font-size:14px; color:#777; margin-bottom:30px;">
+                                화안노동법률사무소 소식지
+                            </div>
+                        </td>
+                    </tr>
+                </table>
+
+                <!-- 뉴스 섹션 이미지 -->
+                <img src="https://raw.githubusercontent.com/brett228/LaborAgent/master/img/newsletter_news.png"
+                     width="720" height="70" alt="뉴스 섹션"
+                     style="margin: 0 auto 20px auto;" />
+
+                {% for article in articles %}
+                <table role="presentation" width="100%" style="margin-bottom:35px; border-bottom:1px solid #e5e5e5; padding-bottom:20px;">
+                    <tr>
+                        <td>
+                            <div style="font-size:17px; font-weight:700; color:#333; margin-bottom:6px;">
+                                "{{ article.title }}"
+                            </div>
+                            <div style="font-size:13px; color:#777; margin-bottom:10px;">
+                                ({{ article.date }} · <a href="{{ base_url }}{{ article.link }}" target="_blank">원문링크</a>)
+                            </div>
+                            <div style="font-size:15px; color:#444; background:#f2f2f2; padding:16px; border:1px solid #e0e0e0; white-space:pre-line;">
+                                {{ article.content }}
+                            </div>
+                        </td>
+                    </tr>
+                </table>
+                {% endfor %}
+
+                <!-- 자문사례 -->
+                <img src="https://raw.githubusercontent.com/brett228/LaborAgent/master/img/newsletter_consult.png"
+                     width="720" height="70" alt="자문사례"
+                     style="margin: 0 auto 20px auto;" />
+
+                <table role="presentation" width="100%" style="margin-bottom:35px; border-bottom:1px solid #e5e5e5; padding-bottom:20px;">
+                    <tr>
+                        <td>
+                            <div style="font-size:17px; font-weight:700; color:#333; margin-bottom:6px;">
+                                "{{ consult.title }}"
+                            </div>
+                            <div style="font-size:15px; color:#444; background:#f2f2f2; padding:16px; border:1px solid #e0e0e0; white-space:pre-line;">
+                                {{ consult.content }}
+                            </div>
+                        </td>
+                    </tr>
+                </table>
+
+                <!-- 정책자료 -->
+                <img src="https://raw.githubusercontent.com/brett228/LaborAgent/master/img/newsletter_policy.png"
+                     width="720" height="70" alt="정책자료"
+                     style="margin: 0 auto 20px auto;" />
+
+                <table role="presentation" width="100%" style="margin-bottom:10px;">
+                    <tr>
+                        <td>
+                            <div style="font-size:17px; font-weight:700; color:#333; margin-bottom:6px;">
+                                "{{ policy.title }}"
+                            </div>
+                            <div style="font-size:15px; color:#444; background:#f2f2f2; padding:16px; border:1px solid #e0e0e0; white-space:pre-line;">
+                                {{ policy.content }}
+                            </div>
+                        </td>
+                    </tr>
+                </table>
+
+                <!-- 푸터 -->
+                <table role="presentation" width="100%" style="margin-top:40px;">
+                    <tr>
+                        <td align="center"
+                            style="font-size:13px; color:#888; text-align:center; background:#f2f2f2; padding:16px; border:1px solid #e0e0e0;">
+                            © 2025 화안노동법률사무소<br>
+                            화안노동법률사무소에서 전해 드립니다.<br>
+                            뉴스레터 관련 문의 : <a href="mailto:hpsol@hpsol.co.kr">hpsol@hpsol.co.kr</a>
+                        </td>
+                    </tr>
+                </table>
+
+            </td>
+        </tr>
+    </table>
+
+</td>
+</tr>
+</table>
+
+</body>
+</html>
