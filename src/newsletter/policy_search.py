@@ -74,7 +74,7 @@ def search_press_release(max_pages=None):
         html = fetch_press_list(page_index)
         
         rslt.extend(html)
-        print(f"[INFO] Page {page_index} crawled, {len(html)} items")
+        # print(f"[INFO] Page {page_index} crawled, {len(html)} items")
         page_index += 1
         time.sleep(0.2)
 

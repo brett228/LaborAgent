@@ -28,7 +28,7 @@ class NewsletterAgent:
             "main_title": None,
             "news_topic": None,
             "consult_topic": None,
-            "date": datetime.today(),
+            "date": datetime.today().strftime('%Y.%m.%d'),
             "articles": [],
             "consult": [],
             "policy": []
@@ -46,7 +46,7 @@ class NewsletterAgent:
         self.process_sections()
 
         # 3. 렌더링 후 HTML 생성
-        # self.render_final_html()
+        self.render_final_html()
 
         print("\n### 뉴스레터 제작이 완료되었습니다! ###")
 
@@ -97,7 +97,7 @@ class NewsletterAgent:
 
     # --------------------------------------------------------------------
     def process_sections(self):
-        print("2) 섹션별 콘텐츠 구성 단계\n")
+        print("4) 섹션별 콘텐츠 구성 단계\n")
 
         # 메인타이틀 후보 생성
         self.create_main_title()
@@ -126,7 +126,7 @@ class NewsletterAgent:
         # 몇 주차인지 계산 (월요일=0)
         week_number = math.ceil((day + first_day.weekday()) / 7)
 
-        main_title = f"{year}년 {month}월 {week_number}주차 뉴스레터"
+        main_title = f"[화안HR] {year}년 {month}월 {week_number}주차 뉴스레터"
         self.state["main_title"] = main_title
 
     # --------------------------------------------------------------------
@@ -142,8 +142,10 @@ class NewsletterAgent:
           - 항상 한글로만 대답합니다.
           - 욕설과 비속어는 사용하지 않습니다.
           - 당신의 답변은 주어진 뉴스기사에만 근거해야 합니다.
+            단, 답변과 관련한 근거를 국가법령정보센터(www.law.go.kr)로부터 검색하여 사용할 수는 있습니다.
           - '~입니다.', '~습니다'와 같은 격식을 갖춘 어미로 구성된 존대말를 사용합니다.
             절대로 “~다”, “~요”, “합니다”, “해요”, “합니다요”, "~임", "~음" 등의 어미를 사용하지 않습니다.
+          - 문단 사이에 적절히 줄바꿈을 하고 줄바꿈 시 줄바꿈 문자를 적용합니다.(\n\n)
         
         2. 주어진 기사의 전문을 바탕으로 기사의 요약과 시사점을 json 형식으로 출력합니다.
             항상 아래 JSON형식으로만 출력하세요:
@@ -187,7 +189,7 @@ class NewsletterAgent:
             "link": self.selected_source['link']
             }
 
-        self.state["articles"] = chosen_articles
+        self.state["articles"] = [chosen_articles]
 
     # --------------------------------------------------------------------
     def create_consult_section(self):
@@ -202,9 +204,13 @@ class NewsletterAgent:
           - 항상 한글로만 대답합니다.
           - 욕설과 비속어는 사용하지 않습니다.
           - 당신의 답변은 주어진 질의응답 원문에만 근거해야 합니다.
+            단, 답변과 관련한 근거를 국가법령정보센터(www.law.go.kr)로부터 검색하여 사용할 수는 있습니다.
           - '~입니다.', '~습니다'와 같은 격식을 갖춘 어미로 구성된 존대말를 사용합니다.
             절대로 “~다”, “~요”, “합니다”, “해요”, “합니다요”, "~임", "~음" 등의 어미를 사용하지 않습니다.
             다만, 질문 작성 부분에 한해 "~요?"와 같은 친근한 어투로 작성합니다.
+          - 원문에 나온 내용을 그대로 쓰지 않고, 적절히 수정합니다. 일반적인 사례로 읽히도록 해야하므로
+            '귀하', '귀 질의'와 같은 표현은 쓰지 않습니다.
+          - 문단 사이에 적절히 줄바꿈을 하고 줄바꿈 시 줄바꿈 문자를 적용합니다.(\n\n)
         
         2. 주어진 질의응답 전문을 바탕으로 질문과 그에 대한 응답을 매끄럽게 정리하여 json 형식으로 출력합니다.
             항상 아래 JSON형식으로만 출력하세요:
@@ -243,7 +249,7 @@ class NewsletterAgent:
             "answer": json.loads(response.choices[0].message.content)['answer'],
             }
 
-        self.state["consult_items"] = chosen_consult
+        self.state["consult"] = chosen_consult
 
     # --------------------------------------------------------------------
     def create_policy_section(self):

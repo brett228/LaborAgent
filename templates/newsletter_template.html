@@ -33,7 +33,7 @@
                  
                 <table role="presentation" width="100%">
                     <tr>
-                        <td align="center"">
+                        <td align="center">
                             <img src="https://raw.githubusercontent.com/brett228/LaborAgent/master/img/ci.png"
                                  width="110" alt="화안노동법률사무소 로고"
                                  style="display:block;" />
@@ -42,7 +42,7 @@
 
                     <tr>
                         <td align="center" style="text-align:center;">
-                            <div style="font-size:15px; font-weight:600; margin-bottom:3px; color:#333;">
+                            <div style="font-size:16px; font-weight:600; margin-bottom:3px; color:#333;">
                                 화안노동법률사무소
                             </div>
                             <div style="font-size:14px; color:#666; margin-bottom:20px;">
@@ -52,7 +52,7 @@
                             <div style="font-size:24px; font-weight:800; margin-top:10px; margin-bottom:3px; color:#111;">
                                 {{ main_title }}
                             </div>
-                            <div style="font-size:14px; color:#777; margin-bottom:30px;">
+                            <div style="font-size:15px; color:#777; margin-bottom:30px;">
                                 화안노동법률사무소 소식지
                             </div>
                         </td>
@@ -68,16 +68,16 @@
                 <table role="presentation" width="100%" style="margin-bottom:35px; border-bottom:1px solid #e5e5e5; padding-bottom:20px;">
                     <tr>
                         <td>
-                            <div style="font-size:17px; font-weight:700; color:#333; margin-bottom:6px;">
+                            <div style="font-size:20px; font-weight:700; color:#333; margin-bottom:6px;">
                                 "{{ article.title }}"
                             </div>
-                            <div style="font-size:13px; color:#777; margin-bottom:10px;">
-                                ({{ article.date }} · <a href="{{ base_url }}{{ article.link }}" target="_blank">원문링크</a>)
+                            <div style="font-size:14px; color:#777; margin-bottom:10px;">
+                                ({{ article.date }} · <a href="{{ article.link }}" target="_blank">원문링크</a>)
                             </div>
-                            <div style="font-size:15px; color:#444; background:#f2f2f2; padding:16px; border:1px solid #e0e0e0; white-space:pre-line;">
+                            <div style="font-size:16px; color:#444; background:#f2f2f2; padding:16px; border:1px solid #e0e0e0; white-space:pre-line;">
                                 {{ article.content }}
                             </div>
-                            <div style="font-size:15px; color:#444; margin-top:14px; white-space:pre-line; line-height:1.5;">
+                            <div style="font-size:16px; color:#444; margin-top:14px; white-space:pre-line; line-height:1.5;">
                                 <span style="font-weight:700; color:#333;">시사점:</span><br>
                                 {{ article.implication }}
                             </div>
@@ -94,10 +94,10 @@
                 <table role="presentation" width="100%" style="margin-bottom:35px; border-bottom:1px solid #e5e5e5; padding-bottom:20px;">
                     <tr>
                         <td>
-                            <div style="font-size:17px; font-weight:700; color:#333; margin-bottom:6px;">
-                                "{{ consult.question }}"
+                            <div style="font-size:20px; font-weight:700; color:#333; margin-bottom:6px;">
+                                {{ consult.question }}
                             </div>
-                            <div style="font-size:15px; color:#444; background:#f2f2f2; padding:16px; border:1px solid #e0e0e0; white-space:pre-line;">
+                            <div style="font-size:16px; color:#444; background:#f2f2f2; padding:16px; border:1px solid #e0e0e0; white-space:pre-line;">
                                 {{ consult.answer }}
                             </div>
                         </td>
@@ -113,10 +113,8 @@
                     <tr>
                         <td>
                             <div style="font-size:17px; font-weight:700; color:#333; margin-bottom:6px;">
-                                "{{ policy.title }}"
+                                {{ policy|safe }}
                             </div>
-                            <div style="font-size:15px; color:#444; background:#f2f2f2; padding:16px; border:1px solid #e0e0e0; white-space:pre-line;">
-                                {{ policy.content }}
                             </div>
                         </td>
                     </tr>
