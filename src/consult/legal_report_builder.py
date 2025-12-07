@@ -22,8 +22,8 @@ import pypandoc
 
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-# KK = LegalAgent("임금항목별 통상임금 해당여부 문의- 해외주재원(세금보전금액), 복지포인트, 인센티브- 국외근로수당, 겸직(겸무)수당, 근무지이동수당, 변동상여")
-# KK.run()
+# KK = LegalAgent()
+# KK.run("임금항목별 통상임금 해당여부 문의- 해외주재원(세금보전금액), 복지포인트, 인센티브- 국외근로수당, 겸직(겸무)수당, 근무지이동수당, 변동상여")
 # KK.state
 
 common_directive = """
@@ -41,9 +41,7 @@ class LegalAgent:
     query에 맞는 법령, 판례, 의견 등을 반환
     """
 
-    def __init__(self, query):
-        self.query = query
-        # self.renderer = NewsletterRenderer()
+    def __init__(self):
 
         # 템플릿 구성 슬롯
         self.state = {
@@ -55,20 +53,24 @@ class LegalAgent:
             "date": datetime.today().strftime('%Y.%m.%d'),
         }
 
-    def run(self):
+    def run(self, query):
         print("### 의견서 생성 에이전트 시작 ###\n")
 
-        # 2. 각 템플릿 영역별 요약 및 후보 생성 → 사용자 선택
+        self.query = query
+
+        # 1. 각 템플릿 영역별 생성
         self.process_sections()
 
-        # 3. 렌더링 후 HTML 생성
-        # self.render_final_md()
+        # 2. 렌더링 후 md / pdf 생성
+        self.render_final_md()
+        self.convert_md_to_pdf()
 
         print("\n### 의견서 생성이 완료되었습니다! ###")
 
     
     # --------------------------------------------------------------------
     def create_ground(self):
+
         print("\n[질의 요약 및 법령 근거 생성]")
 
         session = []
@@ -117,7 +119,8 @@ class LegalAgent:
                     
                     수원지방법원 2022. 12. 9. 선고 (사건번호 2021나93038) (https://www.kbei.org/new/05info/s_4.php?action=view&bid=column_kim&idx=472)
                     - 현장소장 지위의 가해자가 안전팀장을 업무에서 배제하고, 욕설·모욕, 근무 위치를 화장실 통로 옆으로 이동, 휴가 명령, 근무 계획표에서만 삭제하는 등의 조치를 한 경우.
-                    - 법원은 위 행위를 직장 내 괴롭힘으로 인정하고, 위자료 300만 원 지급을 판결함."} 
+                    - 법원은 위 행위를 직장 내 괴롭힘으로 인정하고, 위자료 300만 원 지급을 판결함."
+            } 
         """
         session = [
             {"role": "system", "content": common_directive},
@@ -128,11 +131,25 @@ class LegalAgent:
         response = client.chat.completions.create(
             model="gpt-4o",
             messages=session,
+            response_format={"type": "json_object"},
             )
         
-        self.state["query_summary"] = json.loads(response.choices[0].message.content)['query_summary']
-        self.state["related_laws"] = json.loads(response.choices[0].message.content)['related_laws']
-        self.state["related_cases"] = json.loads(response.choices[0].message.content)['related_cases']
+        content = response.choices[0].message.content.strip()
+        if not content:
+            raise ValueError("LLM 응답이 비어있습니다.")
+
+        try:
+            parsed = json.loads(content)
+        except json.JSONDecodeError as e:
+            print("JSON 파싱 오류 발생:", e)
+            print("원본 응답:", content)
+            parsed = {}
+        self.state["query_summary"] = parsed.get("query_summary", "")
+        self.state["related_laws"] = parsed.get("related_laws", "")
+        self.state["related_cases"] = parsed.get("related_cases", "")
+        # self.state["query_summary"] = json.loads(response.choices[0].message.content)['query_summary']
+        # self.state["related_laws"] = json.loads(response.choices[0].message.content)['related_laws']
+        # self.state["related_cases"] = json.loads(response.choices[0].message.content)['related_cases']
 
 
     def select_consult_sources_and_crawl(self):
@@ -233,7 +250,7 @@ class LegalAgent:
 
     # --------------------------------------------------------------------
     def process_sections(self):
-        print("4) 섹션별 콘텐츠 구성 단계\n")
+        print("섹션별 콘텐츠 구성 단계 실행\n")
 
         # 질의 요약 및 관련 법령 구성
         self.create_ground()
@@ -252,13 +269,15 @@ class LegalAgent:
             template_content = f.read()
 
         template = Template(template_content)
-        rendered_md = template.render(**self._state)
+        rendered_md = template.render(**self.state)
         
         # 파일로 저장
         with open("legal_opinion.md", "w", encoding="utf-8") as f:
             f.write(rendered_md)
-
-    def convert_md_to_pdf(md_path='legal_opinion.md', pdf_path='legal_opinion.pdf'):
+    
+    def convert_md_to_pdf(self, md_path='legal_opinion.md', pdf_path='legal_opinion.pdf'):
+        print(md_path)
+        os.path.exists(md_path)
         """Convert markdown to PDF using pypandoc."""
         pypandoc.convert_file(
             md_path,
