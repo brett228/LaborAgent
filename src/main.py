@@ -19,6 +19,7 @@ from chromadb import PersistentClient
 from src.embeddings import get_embedding
 from src.rag.load_index import load_chroma_collection, search_vector_store, search_multiple_collections
 from src.generate_report import generate_report
+from src.newsletter.newsletter_builder import NewsletterAgent
 
 # Explicitly load .env from project root (parent of src)
 env_path = Path(__file__).parent.parent / ".env"
