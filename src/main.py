@@ -18,7 +18,7 @@ from pathlib import Path
 from chromadb import PersistentClient
 from src.embeddings import get_embedding
 from src.rag.load_index import load_chroma_collection, search_vector_store, search_multiple_collections
-from src.generate_report import generate_report
+from src.consult.legal_report_builder import LegalAgent
 from src.newsletter.newsletter_builder import NewsletterAgent
 
 # Explicitly load .env from project root (parent of src)
@@ -27,7 +27,42 @@ load_dotenv(dotenv_path=env_path)
 
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
+# Create Agent instance
+create_newsletter = NewsletterAgent()
+create_legalreport = LegalAgent()
+
+tool_implementations = {
+    "create_legalreport": lambda query=None: create_legalreport.run(query=query),
+    "create_newsletter": lambda: create_newsletter.run()
+}
+
 tools = [
+    {
+        "type": "function",
+        "function": {
+            "name": "create_newsletter",
+            "description": "create newsletter on recent issues on labor market",
+        },
+    },
+
+    {
+        "type": "function",
+        "function": {
+            "name": "create_legalreport",
+            "description": "create legal report according to customer's query on labor issue",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "사용자 질문"
+                    }
+                },
+                "required": ["query"],
+            },
+        }
+    },
+
     {
         "type": "function",
         "function": {
@@ -118,17 +153,15 @@ def get_response(query, collection_names=None, directive="", continuous=False):
           - 욕설과 비속어는 사용하지 않습니다.
           - 당신의 답변 영역은 인사/노무 분야로 한정되며, 그 외의 일반적인 질문에 대해서는 답을 피합니다.
         
-        1. 사용자가 질문하면 관련 문서를 검색하기 위해 반드시 search_multiple_collections 함수를 호출합니다.
+        1. 사용자가 인사/노무 관련 질문을 하면 관련 문서를 검색하기 위해 반드시 search_multiple_collections 함수를 호출합니다.
           - 검색되지 않은 사항에 대해서는 답변하지 않습니다.
           - 답변에는 검색된 문서의 출처와 링크를 포함합니다.
           - 답변 근거를 찾은 collecion 이름과 문서 ID를 명시합니다.
           - 문장을 단락으로 구분하고 이해하기 쉽게 작성합니다. 
 
-        2. 사용자가 보고서, 리포트, 정리, 문서화 등을 요청하면 다음 순서를 따라 답합니다.
-          1) 먼저 search_multiple_collections 함수를 호출해 관련 문서를 검색한다.
-          2) 검색 결과를 기반으로 보고서 구조(요약, 세부 내용, 출처 등)를 만든다.
-          3) 그 다음 generate_report 함수를 호출하여 완성된 보고서를 생성한다.
-        - 보고서를 만들기 전에 RAG 검색 없이 직접 내용을 생성하지 말 것.
+        2. 사용자가 노무 보고서, 의견서 등을 요청하면 create_legalreport 함수를 호출합니다.
+
+        3. 사용자가 뉴스레터 작성을 요청하면 create_newsletter 함수를 호출합니다.
         """
     session.append({"role": "system", "content": directive})
 
@@ -178,11 +211,15 @@ def get_response(query, collection_names=None, directive="", continuous=False):
                         top_k=args.get("top_k", 5),
                     )
 
-            elif func_name == "generate_report":
-                result = generate_report(title=args["title"], 
-                                         sections=args["sections"], 
-                                         format=args.get("format", "markdown"),
-                                         )
+            if func_name in tool_implementations:
+                result = tool_implementations[func_name](**args)
+
+            # elif func_name == "create_legalreport":
+            #     result = create_legalreport.run()
+
+            # elif func_name == "create_newsletter":
+            #     result = create_newsletter.run()
+
             else:
                 result = {"error": f"Unknown tool: {func_name}"}
 
