@@ -8,6 +8,8 @@ from src.rag.load_index import load_chroma_collection, search_vector_store
 from src.newsletter.news_searcher import search_all_newslist, search_all_text
 from src.newsletter.policy_search import search_press_release
 from src.newsletter.newsletter_renderer import NewsletterRenderer
+from src.utils.selectors import prompt_user_choice, prompt_user_choice_multiple
+from src.utils.storage import save_html
 from openai import OpenAI
 
 
@@ -32,144 +34,104 @@ class NewsletterAgent:
             "policy": []
         }
 
-        self._raw_articles = None
-        self._raw_consult = None
-        self._selected_news_source = None
-        self._selected_policy_items = None
+    def run(self):
+        print("### 뉴스레터 제작 에이전트 시작 ###\n")
 
-         # 멀티턴 진행 상태
-        self._phase = "ask_news_topic"  
-        # ask_news_topic → news_search → ask_consult_topic → consult_search → policy_select → ready_to_generate
+        # 1. 사용자에게 소스 선택받기
+        self.select_news_sources_and_crawl()
+        self.select_consult_sources_and_crawl()
+        self.select_policy_sources_and_crawl()
 
+        # 2. 각 템플릿 영역별 요약 및 후보 생성 → 사용자 선택
+        self.process_sections()
 
-    def run_steps(self, user_input: str):
-        if self._phase == "ask_news_topic":
-            msg = self.ask_news_topic()
-            return {"message": msg}
-        elif self._phase == "ask_consult_topic":
-            msg = self.ask_consult_topic()
-            return {"message": msg}
-        elif self._phase == "set_news_topic":
-            msg = self.set_news_topic()
-            return {"message": msg}
-        elif self._phase == "set_consult_topic":
-            msg = self.set_consult_topic()
-            return {"message": msg}
-        elif self._phase == "news_search":
-            results = self.search_news_sources(user_input)
-            return {"options": results}  # 사용자 선택 필요
+        # 3. 렌더링 후 HTML 생성
+        self.render_final_html()
 
-        elif self._phase == "consult_search":
-            results = self.search_consult_sources(user_input)
-            return {"options": results}  # 사용자 선택 필요
+        print("\n### 뉴스레터 제작이 완료되었습니다! ###")
 
-        elif self._phase == "policy_select":
-            self.choose_policy(user_input)
-            return {"message": "정책 자료 선택 완료"}
+    # --------------------------------------------------------------------
+    def select_news_sources_and_crawl(self):
 
-        elif self._phase == "ready_to_generate":
-            html = self.run()  # 최종 뉴스레터 생성
-            return {"newsletter": html}
+        self.news_topic = input("1) 뉴스레터에 포함할 뉴스 주제를 알려주세요: ")
+        self.state["news_topic"] = self.news_topic
+        print(f"> 입력된 주제: {self.news_topic}\n")
+        
+        news_sources = search_all_newslist(self.news_topic)
+        available_sources = [[news['title'], news['date']] for news in news_sources]
 
-        else:
-            return {"message": "알 수 없는 단계입니다."}
+        selected_title = prompt_user_choice(available_sources)[0]
+        print(f"선택된 뉴스: {selected_title}")
 
+        self.selected_source = [news for news in news_sources if news['title'] == selected_title][0]
 
-    # ============================================================
-    # 멀티턴 입력 단계
-    # ============================================================
-
-    def ask_news_topic(self):
-        self._phase == "set_news_topic"
-        return "뉴스 검색을 위한 주제를 입력해 주시기 바랍니다."
-
-    def ask_consult_topic(self):
-        self._phase == "set_consult_topic"
-        return "노무 상담사례 검색을 위한 주제를 입력해 주시기 바랍니다."
-
-    def set_topic(self, user_input):
-        """
-        멀티턴을 통해 사용자가 입력한 텍스트를 받아 적절한 슬롯에 저장.
-        """
-        if self._phase == "set_news_topic":
-            self.state["news_topic"] = user_input
-            self._phase = "news_search"
-            return f"뉴스 검색을 '{user_input}' 주제로 진행하겠습니다."
-
-        elif self._phase == "set_consult_topic":
-            self.state["consult_topic"] = user_input
-            self._phase = "consult_search"
-            return f"상담 사례 검색을 '{user_input}' 주제로 진행하겠습니다."
-
-        else:
-            return "현재 주제를 입력받는 단계가 아닙니다."
-
-
-    # ===========================
-    # 1) 뉴스 검색 및 선택
-    # ===========================
-    def search_news_sources(self, topic: str):
-        self.state["news_topic"] = topic
-        return search_all_newslist(topic)
-
-    def choose_news_source(self, news_sources, selected_title):
-        chosen = next(item for item in news_sources if item["title"] == selected_title)
-        self._selected_news_source = chosen
-        self._raw_articles = search_all_text(chosen)
-        self._phase = "ask_consult_topic"
-        return chosen
-
-    # ===========================
-    # 2) 자문사례 검색 및 선택
-    # ===========================
-    def search_consult_sources(self, topic: str):
-        moel_iqrs = load_chroma_collection(
-            load_dir="db/chroma_index",
-            collection_name="moel_iqrs"
-        )[0]
-
-        results = search_vector_store(
-            collection=moel_iqrs,
-            query=topic,
-            get_embedding_fn=get_embedding,
-            top_k=5
-        )   
-        return results
-
-    def choose_consult_source(self, consult_sources, selected_title):
-        chosen = next(item for item in consult_sources if item.startswith(f"Title: {selected_title}"))
-        self._raw_consult = chosen
-        self._phase = "policy_select"
-        return chosen
+        self.raw_articles = search_all_text(self.selected_source)
+        print(f"기사 전문을 로드했습니다.\n")
     
-    # ===========================
-    # 3) 정책자료 검색 및 선택
-    # ===========================
-    def search_policy_sources(self, max_page=3):
-        return search_press_release(max_page)
+    # --------------------------------------------------------------------
+    def select_consult_sources_and_crawl(self):
 
-    def choose_policy(self, selected_items):
-        self._selected_policy_items = selected_items
-        self._phase = "ready_to_generate"
+        self.consult_topic = input("2) 뉴스레터에 포함할 자문사례 주제를 알려주세요: ")
+        self.state["consult_topic"] = self.consult_topic
+        print(f"> 입력된 자문사례 주제: {self.consult_topic}\n")
+        
+        # 질의회시로부터 검색
+        moel_iqrs = load_chroma_collection(load_dir="db/chroma_index", collection_name="moel_iqrs")[0]
+        consult_sources = search_vector_store(collection=moel_iqrs, query=self.consult_topic, get_embedding_fn=get_embedding, top_k=5)
+        available_sources = [item.split('\nQ:')[0].replace('Title: ', '') for item in consult_sources]
 
-    # ===========================
-    # 4) 메인 타이틀 생성
-    # ===========================
+        selected_title = prompt_user_choice(available_sources)
+        print(f"선택된 자문사례: {selected_title}")
+
+        self.raw_consult = next(item for item in consult_sources if item.startswith(f'Title: {selected_title}'))
+
+        print(f"질의회시 전문을 로드했습니다.\n")
+
+    def select_policy_sources_and_crawl(self):
+
+        available_sources = search_press_release(3)
+
+        print("3) 뉴스레터에 포함할 보도자료를 선정합니다. ")
+        self.selected_policy = prompt_user_choice_multiple(available_sources)
+        print(f"선택된 보도자료: {self.selected_policy}")
+
+    # --------------------------------------------------------------------
+    def process_sections(self):
+        print("4) 섹션별 콘텐츠 구성 단계\n")
+
+        # 메인타이틀 후보 생성
+        self.create_main_title()
+
+        # 기사 섹션 구성
+        self.create_article_section()
+
+        # 컨설팅 영역 구성
+        self.create_consult_section()
+
+        # 정책 영역 구성
+        self.create_policy_section()
+
+    # --------------------------------------------------------------------
     def create_main_title(self):
+        print("\n[메인 타이틀 생성]")
+
         today = datetime.today()
-        year, month, day = today.year, today.month, today.day
+
+        year = today.year
+        month = today.month
+        day = today.day
+
+        # 이번달 1일의 요일
         first_day = datetime(year, month, 1)
+        # 몇 주차인지 계산 (월요일=0)
         week_number = math.ceil((day + first_day.weekday()) / 7)
 
-        self.state["main_title"] = f"[화안HR] {year}년 {month}월 {week_number}주차 뉴스레터"
-        return self.state["main_title"]
-    # ===========================
-    # 5) 기사 생성 섹션
-    # ===========================
-    def create_article_section(self): 
+        main_title = f"[화안HR] {year}년 {month}월 {week_number}주차 뉴스레터"
+        self.state["main_title"] = main_title
+
+    # --------------------------------------------------------------------
+    def create_article_section(self):
         print("\n[기사 섹션 구성]")
-        if self._raw_articles is None:
-            raise ValueError("기사 전문이 없습니다. choose_news_source() 먼저 실행하세요.")
 
         session = []
         directive = """
@@ -209,7 +171,7 @@ class NewsletterAgent:
         """
         session = [
             {"role": "system", "content": directive},
-            {"role": "user", "content": f"뉴스 기사 전문:\n{self._raw_articles}"}
+            {"role": "user", "content": f"뉴스 기사 전문:\n{self.raw_articles}"}
             ]
 
         response = client.chat.completions.create(
@@ -218,26 +180,20 @@ class NewsletterAgent:
             response_format={"type": "json_object"},
             )
         
-        parsed = json.loads(response.choices[0].message.content)
+        chosen_articles = {
+            "title": self.selected_source['title'],
+            "date": self.selected_source['date'],
+            # "content": response.choices[0].message.content,
+            "content": json.loads(response.choices[0].message.content)['summary'],
+            "implication": json.loads(response.choices[0].message.content)['implication'],
+            "link": self.selected_source['link']
+            }
 
-        result = {
-            "title": self._selected_news_source["title"],
-            "date": self._selected_news_source["date"],
-            "content": parsed["summary"],
-            "implication": parsed["implication"],
-            "link": self._selected_news_source["link"],
-        }
+        self.state["articles"] = [chosen_articles]
 
-        self.state["articles"] = [result]
-        return result
-    
-    # ===========================
-    # 6) 컨설팅 섹션
-    # ===========================
+    # --------------------------------------------------------------------
     def create_consult_section(self):
         print("\n[컨설팅 영역 구성]")
-        if self._raw_consult is None:
-            raise ValueError("상담사례 원문이 없습니다. choose_consult_source() 먼저 실행하세요.")
 
         session = []
         directive = """
@@ -279,7 +235,7 @@ class NewsletterAgent:
         """
         session = [
             {"role": "system", "content": directive},
-            {"role": "user", "content": f"질의회시 전문:\n{self._raw_consult}"}
+            {"role": "user", "content": f"질의회시 전문:\n{self.raw_consult}"}
             ]
 
         response = client.chat.completions.create(
@@ -287,44 +243,102 @@ class NewsletterAgent:
             messages=session,
             response_format={"type": "json_object"},
             )
-        parsed = json.loads(response.choices[0].message.content)
+        
+        chosen_consult = {
+            "question": json.loads(response.choices[0].message.content)['question'],
+            "answer": json.loads(response.choices[0].message.content)['answer'],
+            }
 
-        result = {
-            "question": parsed["question"],
-            "answer": parsed["answer"],
-        }
+        self.state["consult"] = chosen_consult
 
-        self.state["consult"] = result
-        return result
-    
-    # ===========================
-    # 7) 정책자료 섹션
-    # ===========================
+    # --------------------------------------------------------------------
     def create_policy_section(self):
-        html_text = "<br>".join(
-            f"■ {item['title']} (<a href='{item['link']}'>고용노동부</a>)"
-            for item in self._selected_policy_items
-        )
+        print("\n[보도자료 안내 구성]")
+
+        html_text = '<br>'.join(f"■ {item['title']} (<a href='{item['link']}' target='_blank'>고용노동부</a>)"
+                                for item in self.selected_policy)    
+        
         self.state["policy"] = html_text
-        return html_text
-    
-    # ===========================
-    # 8) HTML 렌더링
-    # ===========================
-    def render_html(self):
-        return self.renderer.render(self.state)
-    
-        # ===========================
-    # 9) 전체 실행 run()
-    # ===========================
-    def run(self):
-        print("\n=== 뉴스레터 생성 프로세스 시작 ===")
-        if self._phase != "ready_to_generate":
-            raise ValueError("아직 모든 선택이 완료되지 않았습니다.")
 
-        self.create_main_title()
-        self.create_article_section()
-        self.create_consult_section()
-        self.create_policy_section()
+    def edit_final_result(self, html):
+        print("\n=== 최종 뉴스레터 미리보기 ===\n")
+        print(html)
 
-        return self.render_html()
+        edit = prompt_user_choice(["수정하기", "그대로 진행"])
+        if edit == "그대로 진행":
+            return html
+        
+        mode = prompt_user_choice([
+            "전체 HTML 직접 수정",
+            "특정 섹션 재작성",
+            "특정 문장만 수정",
+        ])
+
+        # -------------------------
+        # 1) 사용자 직접 전체 HTML 수정
+        # -------------------------
+        if mode == "전체 HTML 직접 수정":
+            print("\n수정할 전체 HTML을 붙여넣어 주세요. (입력이 끝나면 빈 줄 입력)")
+            lines = []
+            while True:
+                line = input()
+                if line.strip() == "":
+                    break
+                lines.append(line)
+            new_html = "\n".join(lines)
+            return new_html
+
+        # -------------------------
+        # 2) 특정 섹션 재작성
+        # -------------------------
+        if mode == "특정 섹션 재작성":
+            section = prompt_user_choice(["메인 제목", "기사 섹션", "자문사례", "정책자료"])
+            user_request = input("어떻게 수정하고 싶은가요? 구체적으로 적어주세요:\n")
+
+            # state 기반으로 LLM에 수정 요청
+            session = [
+                {"role": "system", "content": "당신은 뉴스레터 HTML을 부분적으로 수정하는 에디팅 에이전트입니다. 반드시 JSON만 반환하세요."},
+                {"role": "user", "content": f"현재 HTML:\n{html}"},
+                {"role": "user", "content": f"수정 대상 섹션: {section}"},
+                {"role": "user", "content": f"사용자 수정 요청: {user_request}"}
+            ]
+
+            response = client.chat.completions.create(
+                model="gpt-4o",
+                messages=session,
+                response_format={"type": "json_object"}
+            )
+
+            result = response.choices[0].message.parsed
+            return result.get("html", html)
+
+        # -------------------------
+        # 3) 특정 문장 수정 (patch 방식)
+        # -------------------------
+        if mode == "특정 문장만 수정":
+            target = input("수정하려는 기존 문장을 그대로 입력:\n")
+            new_text = input("바꾸고 싶은 문장을 입력:\n")
+
+            session = [
+                {"role": "system", "content": "HTML 문서에서 특정 문장을 다른 문장으로 교체하는 에이전트입니다. 반드시 JSON으로 결과를 주세요."},
+                {"role": "user", "content": f"원본 HTML:\n{html}"},
+                {"role": "user", "content": f"교체 대상: {target}"},
+                {"role": "user", "content": f"새 문장: {new_text}"}
+            ]
+
+            response = client.chat.completions.create(
+                model="gpt-4o",
+                messages=session,
+                response_format={"type": "json_object"}
+            )
+            result = response.choices[0].message.parsed
+            return result.get("html", html)
+
+        return html
+
+    # --------------------------------------------------------------------
+    def render_final_html(self):
+        html = self.renderer.render(self.state)
+        html = self.edit_final_result(html)
+        save_html("newsletter.html", html)
+        print("HTML 파일이 newsletter.html 로 저장되었습니다.")

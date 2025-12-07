@@ -4,7 +4,7 @@ import math
 import os
 from pathlib import Path
 from jinja2 import Template
-
+import streamlit as st
 
 # RAG 구성
 from chromadb import PersistentClient
@@ -32,6 +32,7 @@ common_directive = """
         - 욕설과 비속어는 사용하지 않습니다.
         - 당신의 답변은 주어진 질의응답 원문에만 근거해야 합니다.
           단, 답변과 관련한 근거를 국가법령정보센터(www.law.go.kr)로부터 검색하여 사용할 수는 있습니다.
+          본 답변은 실제 법률적 조언이 아님을 전제로 합니다.
         - markdown 문법에 적합하도록 문단 사이에 적절히 줄바꿈을 하고 줄바꿈 시 줄바꿈 문자를 적용합니다.(\n\n)
     """
 
@@ -65,7 +66,22 @@ class LegalAgent:
         self.render_final_md()
         self.convert_md_to_pdf()
 
+        # 3. download 설정
+        st.session_state.legal_report_md = "legal_opinion.md"
+        st.session_state.legal_report_pdf = "legal_opinion.pdf"
+        st.chat_message("assistant").write("의견서 생성이 완료되었습니다.")
+
+        if "legal_report_md" in st.session_state:
+            with open("legal_opinion.md", "rb") as f:
+                st.download_button("Download md file", f, file_name="legal_opinion.md")
+        if "legal_report_pdf" in st.session_state:
+            with open("legal_opinion.pdf", "rb") as f:
+                st.download_button("Download pdf file", f, file_name="legal_opinion.pdf")
+
         print("\n### 의견서 생성이 완료되었습니다! ###")
+        return {
+            "message": "의견서가 작성되었습니다. 추가로 필요하신 사항이 있으면 말씀해 주세요."
+        }
 
     
     # --------------------------------------------------------------------

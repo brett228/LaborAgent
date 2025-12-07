@@ -13,6 +13,7 @@ from datetime import datetime, timedelta
 from dotenv import load_dotenv
 from openai import OpenAI
 from pathlib import Path
+import streamlit as st
 
 # RAG 구성
 from chromadb import PersistentClient
@@ -33,7 +34,7 @@ create_legalreport = LegalAgent()
 
 tool_implementations = {
     "create_legalreport": lambda query=None: create_legalreport.run(query=query),
-    "create_newsletter": lambda: create_newsletter.run()
+    "create_newsletter": lambda user_input=None: create_newsletter.run_steps(user_input=user_input),
 }
 
 tools = [
@@ -42,6 +43,16 @@ tools = [
         "function": {
             "name": "create_newsletter",
             "description": "create newsletter on recent issues on labor market",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "user_input": {
+                        "type": "string",
+                        "description": "사용자 응답"
+                    }
+                },
+                "required": ["user_input"],
+            },
         },
     },
 
@@ -131,16 +142,21 @@ DEFAULT_COLLECTIONS = ["moel_iqrs", "moel_fastcounsel"]
 def get_response(query, collection_names=None, directive="", continuous=False):
     global session
 
+    # 세션 초기화
+    if "session" not in st.session_state:
+        st.session_state["session"] = []
+    session = st.session_state["session"]
+
+    # 대화 초기화 옵션
+    if not continuous:
+        session = []
+
     # 기본 컬렉션 지정
     if collection_names is None:
         collection_names = DEFAULT_COLLECTIONS
 
     # Tools 호출한 assistant/tool 메시지는 session에서 제거
     session = [m for m in session if m["role"] not in ["tool", "assistant"]]
-
-    # continuous 모드가 아니면 session 초기화
-    if not continuous:
-        session = []
 
     # system 메시지 설정
     if not directive:
@@ -160,8 +176,11 @@ def get_response(query, collection_names=None, directive="", continuous=False):
           - 문장을 단락으로 구분하고 이해하기 쉽게 작성합니다. 
 
         2. 사용자가 노무 보고서, 의견서 등을 요청하면 create_legalreport 함수를 호출합니다.
+           create_legalreport 함수를 호출할 경우에는 다른 답변은 절대 제공하지 않습니다.
 
-        3. 사용자가 뉴스레터 작성을 요청하면 create_newsletter 함수를 호출합니다.
+        3. 사용자가 "뉴스레터 생성"을 요청하면  create_newsletter 함수를 호출합니다.
+           뉴스레터 생 흐름은 멀티턴으로 진행됩니다.
+           (1) 
         """
     session.append({"role": "system", "content": directive})
 
@@ -210,15 +229,18 @@ def get_response(query, collection_names=None, directive="", continuous=False):
                         get_embedding_fn=get_embedding,
                         top_k=args.get("top_k", 5),
                     )
+                
+            # elif func_name in tool_implementations:
+            #     result = tool_implementations[func_name](**args)
 
-            if func_name in tool_implementations:
-                result = tool_implementations[func_name](**args)
+            elif func_name == "create_legalreport":
+                result = create_legalreport.run(**args)
 
-            # elif func_name == "create_legalreport":
-            #     result = create_legalreport.run()
-
-            # elif func_name == "create_newsletter":
-            #     result = create_newsletter.run()
+            elif func_name == "create_newsletter":
+                result = create_newsletter.run_steps(args.get("user_input", ""))
+                if create_newsletter._phase == "ready_to_generate":
+                    html = create_newsletter.run()
+                    result = {"newsletter": html}
 
             else:
                 result = {"error": f"Unknown tool: {func_name}"}
@@ -229,6 +251,8 @@ def get_response(query, collection_names=None, directive="", continuous=False):
                 "name": func_name,
                 "content": json.dumps(result, ensure_ascii=False)
             })
+            # print(result)
+            # print("tool_messages:", tool_messages)
 
     # Tool 실행 결과 session에 추가
     if choice.message.tool_calls is not None:
@@ -245,4 +269,5 @@ def get_response(query, collection_names=None, directive="", continuous=False):
 
     output_text = final_response.choices[0].message.content
     session.append({"role": "system", "content": output_text})
-    return output_text
+    st.session_state["session"] = session
+    return output_text, tool_messages
