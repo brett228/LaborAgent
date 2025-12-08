@@ -18,6 +18,18 @@ client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 # KK.state['articles']
 
 class NewsletterAgent:
+    PHASE_ASK_NEWS_TOPIC = "ask_news_topic"
+    PHASE_SET_NEWS_TOPIC = "set_news_topic"
+    PHASE_NEWS_SEARCH = "news_search" # User input triggers search, returns options
+    PHASE_AWAITING_NEWS_PICK = "awaiting_news_pick"
+    PHASE_AWAITING_CONSULT_PICK = "awaiting_consult_pick"
+    PHASE_AWAITING_POLICY_PICK = "awaiting_policy_pick"
+    PHASE_ASK_CONSULT_TOPIC = "ask_consult_topic"
+    PHASE_SET_CONSULT_TOPIC = "set_consult_topic"
+    PHASE_CONSULT_SEARCH = "consult_search" # User input triggers search, returns options
+    PHASE_POLICY_SELECT = "policy_select" # This phase returns policy options
+    PHASE_READY_TO_GENERATE = "ready_to_generate"
+
     def __init__(self):
         self.renderer = NewsletterRenderer()
 
@@ -36,74 +48,75 @@ class NewsletterAgent:
         self._raw_consult = None
         self._selected_news_source = None
         self._selected_policy_items = None
+        self._news_options = None
+        self._consult_options = None
 
          # 멀티턴 진행 상태
-        self._phase = "ask_news_topic"  
+        self._phase = self.PHASE_ASK_NEWS_TOPIC
         # ask_news_topic → news_search → ask_consult_topic → consult_search → policy_select → ready_to_generate
 
 
     def run_steps(self, user_input: str):
-        if self._phase == "ask_news_topic":
-            msg = self.ask_news_topic()
-            return {"message": msg}
-        elif self._phase == "ask_consult_topic":
-            msg = self.ask_consult_topic()
-            return {"message": msg}
-        elif self._phase == "set_news_topic":
-            msg = self.set_news_topic()
-            return {"message": msg}
-        elif self._phase == "set_consult_topic":
-            msg = self.set_consult_topic()
-            return {"message": msg}
-        elif self._phase == "news_search":
-            results = self.search_news_sources(user_input)
-            return {"options": results}  # 사용자 선택 필요
-
-        elif self._phase == "consult_search":
-            results = self.search_consult_sources(user_input)
-            return {"options": results}  # 사용자 선택 필요
-
-        elif self._phase == "policy_select":
-            self.choose_policy(user_input)
-            return {"message": "정책 자료 선택 완료"}
-
-        elif self._phase == "ready_to_generate":
-            html = self.run()  # 최종 뉴스레터 생성
-            return {"newsletter": html}
-
-        else:
-            return {"message": "알 수 없는 단계입니다."}
-
-
-    # ============================================================
-    # 멀티턴 입력 단계
-    # ============================================================
-
-    def ask_news_topic(self):
-        self._phase == "set_news_topic"
-        return "뉴스 검색을 위한 주제를 입력해 주시기 바랍니다."
-
-    def ask_consult_topic(self):
-        self._phase == "set_consult_topic"
-        return "노무 상담사례 검색을 위한 주제를 입력해 주시기 바랍니다."
-
-    def set_topic(self, user_input):
-        """
-        멀티턴을 통해 사용자가 입력한 텍스트를 받아 적절한 슬롯에 저장.
-        """
-        if self._phase == "set_news_topic":
+        # Check for the INITIAL state first, regardless of user input content.
+        print('### 뉴스레터를 작성 에이전트 시작 ###')
+        if self._phase == self.PHASE_ASK_NEWS_TOPIC:
+            # 1st Turn: User initiated the process. Transition to phase 2 (awaiting subject).
+            self._phase = self.PHASE_SET_NEWS_TOPIC
+            print('setting news topic...')
+            return {"type": "message", "content": "뉴스 검색을 위한 **주제**를 입력해 주시기 바랍니다."}
+        # --- PHASE 2: RECEIVING THE SUBJECT (This is where the search should run) ---
+        elif self._phase == self.PHASE_SET_NEWS_TOPIC:
+            if not user_input or user_input.lower() in ["뉴스레터를 작성해줘", "시작", ""]:
+                # If the user somehow repeats the trigger, or provides empty input, ask again.
+                return {"type": "message", "content": "주제를 명확히 입력해 주셔야 검색을 진행할 수 있습니다."}
+            
+            # Case: User has provided a subject (e.g., "산재"). Execute search immediately.
             self.state["news_topic"] = user_input
-            self._phase = "news_search"
-            return f"뉴스 검색을 '{user_input}' 주제로 진행하겠습니다."
 
-        elif self._phase == "set_consult_topic":
+            # Execute search
+            print('searching news...')
+            results = self.search_news_sources(user_input)
+            self._news_options = results
+            
+            # Transition to waiting for the user to pick one of the options
+            self._phase = self.PHASE_AWAITING_NEWS_PICK
+            return {"type": "options_news", "content": results, "message": f"'{user_input}'(으)로 검색된 뉴스 기사 목록입니다. **하나를 선택**해 주세요."}
+        
+        # --- PHASE 3/4: CONSULT TOPIC START/INPUT ---
+        # This handles receiving the subject for the consulting section
+        elif self._phase == self.PHASE_ASK_CONSULT_TOPIC:
+            self._phase = self.PHASE_SET_CONSULT_TOPIC
+            print('setting consulting topic...')
+            return {"type": "message", "content": "이제 노무 상담사례 검색을 위한 **주제**를 입력해 주시기 바랍니다."}
+
+        elif self._phase == self.PHASE_SET_CONSULT_TOPIC:
+            # Case: User provides consult subject. Execute search immediately.
             self.state["consult_topic"] = user_input
-            self._phase = "consult_search"
-            return f"상담 사례 검색을 '{user_input}' 주제로 진행하겠습니다."
+            
+            results = self.search_consult_sources(user_input)
+            self._consult_options = results
+            
+            self._phase = self.PHASE_AWAITING_CONSULT_PICK
+            return {"type": "options_consult", "content": results, "message": f"'{user_input}'(으)로 검색된 노무 상담 사례 목록입니다. **하나를 선택**해 주세요."}
+                    
+        # 5. FINAL GENERATION
+        elif self._phase == self.PHASE_READY_TO_GENERATE:
+            # Check if user input is the trigger to run final generation
+            if "생성" in user_input.lower() or "generate" in user_input.lower():
+                 html = self.run() 
+                 # Reset phase after successful generation
+                 self._phase = self.PHASE_ASK_NEWS_TOPIC
+                 return {"type": "newsletter", "content": html}
+            else:
+                 return {"type": "message", "content": "뉴스레터 생성을 원하시면 '생성'을 입력해주세요."}
 
+        # --- PHASE 6: Awaiting pick (Handled by app.py UI, Agent just waits) ---
+        elif self._phase in [self.PHASE_AWAITING_NEWS_PICK, self.PHASE_AWAITING_CONSULT_PICK, self.PHASE_AWAITING_POLICY_PICK]:
+            print('awating user pick...')
+            return {"type": "message", "content": f"시스템 대기 중입니다. 사용자에게 선택지 제시 중입니다. (현재: {self._phase})"}
+        
         else:
-            return "현재 주제를 입력받는 단계가 아닙니다."
-
+            return {"type": "message", "content": "알 수 없는 단계입니다."}
 
     # ===========================
     # 1) 뉴스 검색 및 선택
@@ -113,9 +126,14 @@ class NewsletterAgent:
         return search_all_newslist(topic)
 
     def choose_news_source(self, news_sources, selected_title):
+
+        if not self._news_options:
+            raise Exception("뉴스 옵션이 없습니다. 먼저 검색을 실행해야 합니다.")
+
         chosen = next(item for item in news_sources if item["title"] == selected_title)
         self._selected_news_source = chosen
         self._raw_articles = search_all_text(chosen)
+
         self._phase = "ask_consult_topic"
         return chosen
 
@@ -137,20 +155,26 @@ class NewsletterAgent:
         return results
 
     def choose_consult_source(self, consult_sources, selected_title):
-        chosen = next(item for item in consult_sources if item.startswith(f"Title: {selected_title}"))
+        if not self._consult_options:
+            raise Exception("상담 사례 옵션이 없습니다. 먼저 검색을 실행해야 합니다.")
+        
+        chosen = next(item for item in self._consult_options if item.startswith(f"Title: {selected_title}"))
         self._raw_consult = chosen
-        self._phase = "policy_select"
+
+        self._phase = self.PHASE_POLICY_SELECT
         return chosen
     
     # ===========================
     # 3) 정책자료 검색 및 선택
     # ===========================
     def search_policy_sources(self, max_page=3):
-        return search_press_release(max_page)
+        results = search_press_release(max_page)
+        self._selected_policy_items = results 
+        return results
 
     def choose_policy(self, selected_items):
-        self._selected_policy_items = selected_items
-        self._phase = "ready_to_generate"
+        self._selected_policy_items = selected_items        
+        self._phase = self.PHASE_READY_TO_GENERATE
 
     # ===========================
     # 4) 메인 타이틀 생성
@@ -159,10 +183,12 @@ class NewsletterAgent:
         today = datetime.today()
         year, month, day = today.year, today.month, today.day
         first_day = datetime(year, month, 1)
-        week_number = math.ceil((day + first_day.weekday()) / 7)
+        # Calculate week number (Assuming you want the nth week of the month)
+        week_number = math.ceil((day + first_day.weekday()) / 7) 
 
         self.state["main_title"] = f"[화안HR] {year}년 {month}월 {week_number}주차 뉴스레터"
         return self.state["main_title"]
+    
     # ===========================
     # 5) 기사 생성 섹션
     # ===========================
@@ -314,12 +340,12 @@ class NewsletterAgent:
     def render_html(self):
         return self.renderer.render(self.state)
     
-        # ===========================
+    # ===========================
     # 9) 전체 실행 run()
     # ===========================
     def run(self):
         print("\n=== 뉴스레터 생성 프로세스 시작 ===")
-        if self._phase != "ready_to_generate":
+        if self._phase != self.PHASE_READY_TO_GENERATE:
             raise ValueError("아직 모든 선택이 완료되지 않았습니다.")
 
         self.create_main_title()

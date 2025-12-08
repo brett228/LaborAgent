@@ -56,6 +56,8 @@ class LegalAgent:
 
     def run(self, query):
         print("### 의견서 생성 에이전트 시작 ###\n")
+        if not query:
+            raise ValueError("Query cannot be empty for Legal Report generation.")
 
         self.query = query
 

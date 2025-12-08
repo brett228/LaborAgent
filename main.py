@@ -19,8 +19,8 @@ import streamlit as st
 from chromadb import PersistentClient
 from src.embeddings import get_embedding
 from src.rag.load_index import load_chroma_collection, search_vector_store, search_multiple_collections
-from src.consult.legal_report_builder import LegalAgent
-from src.newsletter.newsletter_builder import NewsletterAgent
+# from src.consult.legal_report_builder import LegalAgent
+# from src.newsletter.newsletter_builder import NewsletterAgent
 
 # Explicitly load .env from project root (parent of src)
 env_path = Path(__file__).parent.parent / ".env"
@@ -29,13 +29,13 @@ load_dotenv(dotenv_path=env_path)
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 # Create Agent instance
-create_newsletter = NewsletterAgent()
-create_legalreport = LegalAgent()
+# create_newsletter = NewsletterAgent()
+# create_legalreport = LegalAgent()
 
-tool_implementations = {
-    "create_legalreport": lambda query=None: create_legalreport.run(query=query),
-    "create_newsletter": lambda user_input=None: create_newsletter.run_steps(user_input=user_input),
-}
+# tool_implementations = {
+#     "create_legalreport": lambda query=None: create_legalreport.run(query=query),
+#     "create_newsletter": lambda user_input=None: create_newsletter.run_steps(user_input=user_input),
+# }
 
 tools = [
     {
@@ -48,7 +48,7 @@ tools = [
                 "properties": {
                     "user_input": {
                         "type": "string",
-                        "description": "사용자 응답"
+                        "description": "사용자 응답. 뉴스 주제, 상담 사례 주제, 또는 최종 '생성' 명령을 포함합니다."
                     }
                 },
                 "required": ["user_input"],
@@ -139,7 +139,7 @@ session = []
 
 DEFAULT_COLLECTIONS = ["moel_iqrs", "moel_fastcounsel"]
 
-def get_response(query, collection_names=None, directive="", continuous=False):
+def get_response(query, legal_agent_instance, newsletter_agent_instance, collection_names=None, directive="", continuous=False):
     global session
 
     # 세션 초기화
@@ -198,6 +198,8 @@ def get_response(query, collection_names=None, directive="", continuous=False):
     choice = response.choices[0]
     tool_messages = []
 
+    result = {"error": "Tool call failed or was not handled."}
+
     # Tool Calls 처리
     if choice.finish_reason == "tool_calls":
         for tool_call in choice.message.tool_calls:
@@ -234,12 +236,20 @@ def get_response(query, collection_names=None, directive="", continuous=False):
             #     result = tool_implementations[func_name](**args)
 
             elif func_name == "create_legalreport":
-                result = create_legalreport.run(**args)
+                try:
+                    # Execute the LegalAgent run method
+                    result = legal_agent_instance.run(**args)
+                except Exception as e:
+                    # Catch any exception raised by the agent and report it back to the LLM/UI
+                    error_message = f"LegalAgent execution failed: {type(e).__name__} - {str(e)}"
+                    print(f"ERROR: {error_message}") # Print to server log for debugging
+                    result = {"error": error_message}
 
             elif func_name == "create_newsletter":
-                result = create_newsletter.run_steps(args.get("user_input", ""))
-                if create_newsletter._phase == "ready_to_generate":
-                    html = create_newsletter.run()
+                user_input = args.get("user_input", "")
+                result = newsletter_agent_instance.run_steps(user_input)
+                if hasattr(newsletter_agent_instance, '_phase') and newsletter_agent_instance._phase == "ready_to_generate":
+                    html = newsletter_agent_instance.run()
                     result = {"newsletter": html}
 
             else:
@@ -270,4 +280,4 @@ def get_response(query, collection_names=None, directive="", continuous=False):
     output_text = final_response.choices[0].message.content
     session.append({"role": "system", "content": output_text})
     st.session_state["session"] = session
-    return output_text, tool_messages
+    return output_text, tool_messages, legal_agent_instance, newsletter_agent_instance
