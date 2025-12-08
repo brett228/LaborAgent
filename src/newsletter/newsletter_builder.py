@@ -83,7 +83,7 @@ class NewsletterAgent:
             # 1st Turn: User initiated the process. Transition to phase 2 (awaiting subject).
             self._phase = self.PHASE_SET_NEWS_TOPIC
             print('setting news topic...')
-            return {"type": "message", "content": "뉴스레터의 주목할 만한 뉴스 섹션 위한 검색 **주제**를 입력해 주시기 바랍니다."}
+            return {"type": "message", "content": "뉴스레터의 [**주목할 만한 뉴스**] 섹션을 위한 검색 **주제**를 입력해 주시기 바랍니다."}
         # --- PHASE 2: RECEIVING THE SUBJECT (This is where the search should run) ---
         elif self._phase == self.PHASE_SET_NEWS_TOPIC:
             if not user_input or user_input.lower() in ["뉴스레터를 작성해줘", "시작", ""]:
@@ -107,7 +107,7 @@ class NewsletterAgent:
         elif self._phase == self.PHASE_ASK_CONSULT_TOPIC:
             self._phase = self.PHASE_SET_CONSULT_TOPIC
             print('setting consulting topic...')
-            return {"type": "message", "content": "이제 뉴스레터의 노무 상담사례 섹션을 위한 검색 **주제**를 입력해 주시기 바랍니다."}
+            return {"type": "message", "content": "이제 뉴스레터의 [**자문사례**] 섹션을 위한 검색 **주제**를 입력해 주시기 바랍니다."}
 
         elif self._phase == self.PHASE_SET_CONSULT_TOPIC:
             # Case: User provides consult subject. Execute search immediately.
@@ -130,19 +130,19 @@ class NewsletterAgent:
             return {
                 "type": "options_policy", 
                 "content": results, 
-                "message": "마지막으로 뉴스레터에 포함할 **정책 자료**를 선택해주세요. (여러 개 선택 가능)"
+                "message": "마지막으로 뉴스레터에 포함할 [**정책 자료**]를 선택해주세요. (여러 개 선택 가능)"
             }
                     
         # 5. FINAL GENERATION
         elif self._phase == self.PHASE_READY_TO_GENERATE:
             # Check if user input is the trigger to run final generation
             if "생성" in user_input.lower() or "generate" in user_input.lower():
-                 html = self.run() 
-                 # Reset phase after successful generation
-                 self._phase = self.PHASE_ASK_NEWS_TOPIC
-                 return {"type": "newsletter", "content": html}
+                html = self.run() 
+                # Reset phase after successful generation
+                self.reset_state()
+                return {"type": "newsletter", "content": html}
             else:
-                 return {"type": "message", "content": "뉴스레터 생성을 원하시면 '생성'을 입력해주세요."}
+                return {"type": "message", "content": "뉴스레터 생성을 원하시면 '생성'을 입력해주세요."}
 
         # --- PHASE 6: Awaiting pick (Handled by app.py UI, Agent just waits) ---
         elif self._phase in [self.PHASE_AWAITING_NEWS_PICK, self.PHASE_AWAITING_CONSULT_PICK, self.PHASE_AWAITING_POLICY_PICK]:
@@ -393,12 +393,7 @@ class NewsletterAgent:
         # 1. Capture the final HTML content
         final_html_content = self.render_html()
 
-        # 2. Reset the phase (Crucial for multi-session apps)
-        self.reset_state()
-
         print("\n### 뉴스레터 생성이 완료되었습니다! ###")
         
-        # 3. Return the HTML content inside the 'newsletter' key
-        return {
-            "newsletter": final_html_content
-        }
+        # 2. Return the HTML content inside the 'newsletter' key
+        return final_html_content

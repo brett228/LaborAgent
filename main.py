@@ -178,9 +178,11 @@ def get_response(query, legal_agent_instance, newsletter_agent_instance, collect
         2. 사용자가 노무 보고서, 의견서 등을 요청하면 create_legalreport 함수를 호출합니다.
            create_legalreport 함수를 호출할 경우에는 다른 답변은 절대 제공하지 않습니다.
 
-        3. 사용자가 "뉴스레터 생성"을 요청하면  create_newsletter 함수를 호출합니다.
-           뉴스레터 생 흐름은 멀티턴으로 진행됩니다.
-           (1) 
+        3. 사용자가 "뉴스레터 생성"을 요청하면 create_newsletter 함수를 호출합니다.
+           뉴스레터 생 흐름은 사용자와 에이전트간 multi-turn 대화를 통해 진행되므로, 
+           반드시 뉴스레터 html파일 생성이 완료될 때까지 create_newsletter 함수를 반복 호출해야하며,
+           그 전에 다른 일반적인 답변을 제공하거나 다른 함수를 호출하지 않도록 합니다.
+           
         """
     session.append({"role": "system", "content": directive})
 
