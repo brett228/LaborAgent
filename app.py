@@ -29,25 +29,24 @@ from src.moel_fastcounsel_crawler import main as fastcounsel_update
 # -------------------------
 # 🔧 Handler
 # -------------------------
+
 # 1. Handler for News Selection (The failing step in your conversation)
 def handle_news_selection_click(selected_title):
     agent = st.session_state["newsletter_agent"]
     
-    # 1. Agent processes the selection, updates its internal state to PHASE_ASK_CONSULT_TOPIC
+    # 1. Agent processes selection, sets phase to PHASE_ASK_CONSULT_TOPIC
     agent.choose_news_source(selected_title) 
     
-    # 2. Add user action and transition message to chat history
     st.session_state.chat_history.append({"role": "user", "content": f"뉴스 기사: **{selected_title}** 선택 완료"})
     
-    # 3. IMMEDIATELY call run_steps() to trigger the new phase's prompt ("이제 노무 상담사례...")
-    # NOTE: The user_input is empty because the UI button click provides the selection, not new text input.
+    # 2. Call run_steps to get the NEXT prompt/phase's message.
     next_response = agent.run_steps("") 
     
-    # 4. Add the new phase's prompt to history
+    # 3. Add the next prompt to history
     st.session_state.chat_history.append({"role": "assistant", "content": next_response["content"]})
     
-    # 5. Rerun the app to show the new message and move to the next step
-    st.rerun() 
+    # 4. ONE RERUN: The entire app re-executes and the new prompt is displayed.
+    st.rerun()
 
 # 2. Handler for Consult Selection
 def handle_consult_selection_click(selected_title):
@@ -61,13 +60,63 @@ def handle_consult_selection_click(selected_title):
     
     # Immediately trigger the next search (Policy Search)
     next_response = agent.run_steps("") 
+
+    prompt_content = next_response.get("message", next_response.get("content"))
     
-    st.session_state.chat_history.append({"role": "assistant", "content": next_response["message"]})
+    if prompt_content is not None:
+         st.session_state.chat_history.append({"role": "assistant", "content": prompt_content})
     
     # NOTE: You might need to store `next_response["content"]` (policy options) 
     # if you want to access them easily in the UI. We'll rely on the agent's internal state for now.
     st.rerun()
 
+# 3. Handler for Policy Selection and Final Generation Setup
+def handle_policy_selection_click(policy_options, selected_indices):
+    agent = st.session_state["newsletter_agent"]
+    
+    # 1. Extract the selected items from the full options list
+    selected_items = [policy_options[i] for i in selected_indices]
+    
+    # 2. Agent processes the selection, sets phase to PHASE_READY_TO_GENERATE
+    agent.choose_policy(selected_items) 
+    
+    # 3. Add user action to chat history
+    st.session_state.chat_history.append({"role": "user", "content": f"정책 자료 {len(selected_items)}개 선택 완료"})
+    
+    # 4. IMMEDIATELY call run_steps() to trigger the final readiness message
+    # run_steps should now return the PHASE_READY_TO_GENERATE message.
+    next_response = agent.run_steps("") 
+    
+    # 5. Add the final prompt to history
+    st.session_state.chat_history.append({"role": "assistant", "content": next_response["content"]})
+    
+    # 6. Rerun the app to enable the final generation button
+    st.rerun()
+
+# app.app (Add this function to the handler section)
+
+def handle_final_generation():
+    agent = st.session_state["newsletter_agent"]
+    
+    # 1. Add user action to history (simulating the '생성' command)
+    st.session_state.chat_history.append({"role": "user", "content": "뉴스레터 최종 생성 시작"})
+    
+    with st.spinner("💭 뉴스레터 최종 문서 생성 및 HTML 렌더링 중..."):
+        # 2. Call run_steps with the trigger word. 
+        # Since the phase is PHASE_READY_TO_GENERATE, this executes the agent.run() logic.
+        final_response = agent.run_steps("생성")
+        
+    # 3. Add success message and final document to history
+    if final_response.get("type") == "newsletter":
+        content = final_response.get("content")
+        # Extract the HTML string
+        newsletter_html = content.get("newsletter") if isinstance(content, dict) else content
+        st.session_state["newsletter_html"] = newsletter_html
+        st.session_state.chat_history.append({"role": "assistant", "content": newsletter_html})
+        
+    # 4. Reset the Agent for a new session
+    st.session_state["newsletter_agent"] = NewsletterAgent()
+    
 # -------------------------
 # Streamlit 페이지 설정
 # -------------------------
@@ -184,41 +233,55 @@ for chat in st.session_state.chat_history:
     role = chat["role"]
     content = chat["content"]
 
-    if role == "user":
-        with st.chat_message("user"):
+    with st.chat_message(role):
+
+        if role == "user":
             st.markdown(content)
-    else:
-        try:
-            parsed = json.loads(content)
+        else:
+            try:
+                parsed = json.loads(content)
 
-            if isinstance(parsed, dict):
-                if "report" in parsed:  # 📄 Legal Report
-                    md_report = parsed["report"]
-                    st.markdown("**📝 Legal Report (Markdown)**")
-                    st.markdown(md_report, unsafe_allow_html=True)
+                if isinstance(parsed, dict):
+                    if "report" in parsed:  # 📄 Legal Report
+                        md_report = parsed["report"]
+                        st.markdown("**📝 Legal Report (Markdown)**")
+                        st.markdown(md_report, unsafe_allow_html=True)
 
-                    # PDF Download
-                    pdf_bytes = md_to_pdf_bytes(md_report)
-                    st.download_button(
-                        label="📄 Download PDF",
-                        data=pdf_bytes,
-                        file_name=f"legal_report_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf",
-                        mime="application/pdf"
-                    )
+                        # PDF Download
+                        pdf_bytes = md_to_pdf_bytes(md_report)
+                        st.download_button(
+                            label="📄 Download PDF",
+                            data=pdf_bytes,
+                            file_name=f"legal_report_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf",
+                            mime="application/pdf"
+                        )
 
-                elif "newsletter" in parsed:  # 📰 Newsletter
-                    md_news = parsed["newsletter"]
-                    st.markdown("**📰 Newsletter (Markdown)**")
-                    st.markdown(md_news, unsafe_allow_html=True)
+                    elif "newsletter" in parsed:  # 📰 Newsletter
+                        md_news = parsed["newsletter"]
+                        html_bytes = None
+
+                        if not md_news:
+                            st.error("Error: Newsletter content was generated but is empty.")   
+                        else:
+                            st.markdown("**✅ 뉴스레터 파일 생성이 완료되었습니다.**")
+                            # st.markdown(md_news, unsafe_allow_html=True)
+                            html_bytes = md_news.encode('utf-8')
+
+                            st.download_button(
+                                label="⬇️ Download HTML Newsletter",
+                                data=html_bytes, 
+                                file_name=f"newsletter_{datetime.now().strftime('%Y%m%d_%H%M')}.html", # Use dynamic filename
+                                mime="text/html"
+                                )
+
+                    else:
+                        pass
 
                 else:
-                    st.json(parsed)
+                    st.markdown(content)
 
-            else:
+            except Exception:
                 st.markdown(content)
-
-        except Exception:
-            st.markdown(content)
 
 
 # -------------------------
@@ -252,6 +315,7 @@ if agent_phase == NewsletterAgent.PHASE_ASK_CONSULT_TOPIC:
         except Exception as e:
             # Catch errors during the forced prompt generation
             st.error(f"Error during prompt generation: {e}")
+    pass
 
 if agent_phase == NewsletterAgent.PHASE_AWAITING_NEWS_PICK:
     with st.container(border=True):
@@ -260,17 +324,17 @@ if agent_phase == NewsletterAgent.PHASE_AWAITING_NEWS_PICK:
         # Get options from the agent's internal state
         news_options = current_newsletter_agent._news_options
         if news_options:
+            # ... (Selection box logic remains the same) ...
             titles = [item["title"] for item in news_options]
-            
-            # Use a unique key for the selectbox
             selected_title = st.selectbox("뉴스 기사 목록", titles, key="news_pick_select")
             
             # Button to trigger the transition
             if st.button("뉴스 선택 완료", key="news_pick_button"):
                 handle_news_selection_click(selected_title)
         else:
-            st.warning("뉴스 검색 결과가 없습니다. 주제를 다시 입력해 주세요.")
-            
+            st.warning("뉴스 검색 결과가 없습니다. 주제를 다시 입력해 주세요.")  
+    pass
+
 elif agent_phase == NewsletterAgent.PHASE_AWAITING_CONSULT_PICK:
     with st.container(border=True):
         st.markdown("**2️⃣ 노무 상담 사례 선택**")
@@ -286,13 +350,72 @@ elif agent_phase == NewsletterAgent.PHASE_AWAITING_CONSULT_PICK:
                 handle_consult_selection_click(selected_title)
         else:
             st.warning("상담 사례 검색 결과가 없습니다. 주제를 다시 입력해 주세요.")
+    pass
+
+elif agent_phase == NewsletterAgent.PHASE_AWAITING_POLICY_PICK:
+    with st.container(border=True):
+        st.markdown("**3️⃣ 정책 자료 선택**")
+        
+        # FIX: Policy options are stored in _selected_policy_items
+        policy_options = current_newsletter_agent._selected_policy_items 
+        
+        if policy_options:
+            titles = [item["title"] for item in policy_options]
+            
+            # Use multiselect for policy items
+            selected_indices = st.multiselect(
+                "정책 자료 목록 (다중 선택 가능)", 
+                options=list(range(len(titles))), 
+                format_func=lambda i: titles[i], 
+                key="policy_pick_select"
+            )
+            
+            # You will need a handler for the final policy selection
+            if st.button("정책 선택 완료 및 최종 생성 준비", key="policy_pick_button"):
+                # You'll need to define this handler function!
+                handle_policy_selection_click(policy_options, selected_indices)
+        else:
+            st.warning("정책 자료 검색 결과가 없습니다.")
+    pass
+
+elif agent_phase == NewsletterAgent.PHASE_READY_TO_GENERATE:
+    if "newsletter_html" not in st.session_state:
+        # Generate newsletter once
+        handle_final_generation()
+    
+    with st.chat_message("assistant"):
+        st.markdown("모든 자료 선택이 완료되었습니다. **뉴스레터가 생성되었습니다.**")
+
+    if "newsletter_html" in st.session_state:
+        html_bytes = st.session_state["newsletter_html"].encode("utf-8")
+        st.download_button(
+            label="⬇️ Download HTML Newsletter",
+            data=html_bytes,
+            file_name=f"newsletter_{datetime.now().strftime('%Y%m%d_%H%M')}.html",
+            mime="text/html"
+        )
+
+    # We use a session state flag to ensure automatic generation runs only once
+    # when the app hits this phase, not on every subsequent rerun.
+    # if st.session_state.get("generating_finished") is None:
+        
+    #     # Display an interim message before the spinner takes over
+    #     with st.chat_message("assistant"):
+    #         st.markdown("모든 자료 선택이 완료되었습니다. **자동으로 최종 뉴스레터 생성을 시작합니다.**")
+            
+    #     st.session_state["generating_finished"] = True # Set flag to prevent loop
+    #     handle_final_generation() # Automatically call the function
+    
+    # else:
+    #     # If the flag is set, just wait for the rerun to complete the generation/reset
+    #     pass
 
 # -------------------------
 # 사용자 입력 + 처리
 # -------------------------
-input_disabled = agent_phase.startswith("awaiting") or agent_phase.startswith("ready")
+input_disabled = agent_phase.startswith("awaiting")
 
-if query := st.chat_input("질의를 입력하세요"):
+if query := st.chat_input("질의를 입력하세요", disabled=input_disabled):
     # 1. Add user query to history
     st.session_state.chat_history.append({"role": "user", "content": query})
     with st.chat_message("user"):
