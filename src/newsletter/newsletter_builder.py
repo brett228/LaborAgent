@@ -2,12 +2,14 @@ from datetime import datetime
 import json
 import math
 import os
+import streamlit as st
 
 from src.embeddings import get_embedding
 from src.rag.load_index import load_chroma_collection, search_vector_store
 from src.newsletter.news_searcher import search_all_newslist, search_all_text
 from src.newsletter.policy_search import search_press_release
 from src.newsletter.newsletter_renderer import NewsletterRenderer
+from src.utils.storage import save_html
 from openai import OpenAI
 
 
@@ -54,16 +56,34 @@ class NewsletterAgent:
          # 멀티턴 진행 상태
         self._phase = self.PHASE_ASK_NEWS_TOPIC
         # ask_news_topic → news_search → ask_consult_topic → consult_search → policy_select → ready_to_generate
-
+    
+    def reset_state(self):
+        """Resets all transient state variables for a new document generation session."""
+        self.state = {
+            "main_title": None,
+            "news_topic": None,
+            "consult_topic": None,
+            "date": datetime.today().strftime('%Y.%m.%d'),
+            "articles": [],
+            "consult": [],
+            "policy": []
+        }
+        self._raw_articles = None
+        self._raw_consult = None
+        self._selected_news_source = None
+        self._selected_policy_items = None
+        self._news_options = None
+        self._consult_options = None
+        self._phase = self.PHASE_ASK_NEWS_TOPIC
 
     def run_steps(self, user_input: str):
         # Check for the INITIAL state first, regardless of user input content.
-        print('### 뉴스레터를 작성 에이전트 시작 ###')
+        print('### 뉴스레터 작성 에이전트 시작 ###')
         if self._phase == self.PHASE_ASK_NEWS_TOPIC:
             # 1st Turn: User initiated the process. Transition to phase 2 (awaiting subject).
             self._phase = self.PHASE_SET_NEWS_TOPIC
             print('setting news topic...')
-            return {"type": "message", "content": "뉴스 검색을 위한 **주제**를 입력해 주시기 바랍니다."}
+            return {"type": "message", "content": "뉴스레터의 주목할 만한 뉴스 섹션 위한 검색 **주제**를 입력해 주시기 바랍니다."}
         # --- PHASE 2: RECEIVING THE SUBJECT (This is where the search should run) ---
         elif self._phase == self.PHASE_SET_NEWS_TOPIC:
             if not user_input or user_input.lower() in ["뉴스레터를 작성해줘", "시작", ""]:
@@ -87,7 +107,7 @@ class NewsletterAgent:
         elif self._phase == self.PHASE_ASK_CONSULT_TOPIC:
             self._phase = self.PHASE_SET_CONSULT_TOPIC
             print('setting consulting topic...')
-            return {"type": "message", "content": "이제 노무 상담사례 검색을 위한 **주제**를 입력해 주시기 바랍니다."}
+            return {"type": "message", "content": "이제 뉴스레터의 노무 상담사례 섹션을 위한 검색 **주제**를 입력해 주시기 바랍니다."}
 
         elif self._phase == self.PHASE_SET_CONSULT_TOPIC:
             # Case: User provides consult subject. Execute search immediately.
@@ -98,6 +118,20 @@ class NewsletterAgent:
             
             self._phase = self.PHASE_AWAITING_CONSULT_PICK
             return {"type": "options_consult", "content": results, "message": f"'{user_input}'(으)로 검색된 노무 상담 사례 목록입니다. **하나를 선택**해 주세요."}
+        
+        elif self._phase == self.PHASE_POLICY_SELECT:    
+                # Execute search
+            print('searching policy sources...')
+            results = self.search_policy_sources() # <--- EXECUTES THE SEARCH
+            self._selected_policy_items = results # <--- STORES THE RESULTS
+            
+            # Transition to the waiting phase for user selection
+            self._phase = self.PHASE_AWAITING_POLICY_PICK
+            return {
+                "type": "options_policy", 
+                "content": results, 
+                "message": "마지막으로 뉴스레터에 포함할 **정책 자료**를 선택해주세요. (여러 개 선택 가능)"
+            }
                     
         # 5. FINAL GENERATION
         elif self._phase == self.PHASE_READY_TO_GENERATE:
@@ -125,16 +159,16 @@ class NewsletterAgent:
         self.state["news_topic"] = topic
         return search_all_newslist(topic)
 
-    def choose_news_source(self, news_sources, selected_title):
+    def choose_news_source(self, selected_title):
 
         if not self._news_options:
             raise Exception("뉴스 옵션이 없습니다. 먼저 검색을 실행해야 합니다.")
 
-        chosen = next(item for item in news_sources if item["title"] == selected_title)
+        chosen = next(item for item in self._news_options if item["title"] == selected_title)
         self._selected_news_source = chosen
         self._raw_articles = search_all_text(chosen)
 
-        self._phase = "ask_consult_topic"
+        self._phase = self.PHASE_ASK_CONSULT_TOPIC
         return chosen
 
     # ===========================
@@ -154,7 +188,7 @@ class NewsletterAgent:
         )   
         return results
 
-    def choose_consult_source(self, consult_sources, selected_title):
+    def choose_consult_source(self, selected_title):
         if not self._consult_options:
             raise Exception("상담 사례 옵션이 없습니다. 먼저 검색을 실행해야 합니다.")
         
@@ -335,10 +369,13 @@ class NewsletterAgent:
         return html_text
     
     # ===========================
-    # 8) HTML 렌더링
+    # 8) HTML 렌더링 & 저장
     # ===========================
     def render_html(self):
-        return self.renderer.render(self.state)
+        html = self.renderer.render(self.state)
+        save_html("newsletter.html", html)
+        print("HTML 파일이 newsletter.html 로 저장되었습니다.")
+        return html
     
     # ===========================
     # 9) 전체 실행 run()
@@ -353,4 +390,15 @@ class NewsletterAgent:
         self.create_consult_section()
         self.create_policy_section()
 
-        return self.render_html()
+        # 1. Capture the final HTML content
+        final_html_content = self.render_html()
+
+        # 2. Reset the phase (Crucial for multi-session apps)
+        self.reset_state()
+
+        print("\n### 뉴스레터 생성이 완료되었습니다! ###")
+        
+        # 3. Return the HTML content inside the 'newsletter' key
+        return {
+            "newsletter": final_html_content
+        }
